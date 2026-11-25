@@ -1021,9 +1021,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   /// Banner de teste do Google AdMob (Android).
   static const _bannerAdUnitId = 'ca-app-pub-3940256099942544/6300978111';
 
+  static const _bannerRetryDelays = [
+    Duration(seconds: 30),
+    Duration(seconds: 60),
+    Duration(minutes: 2),
+  ];
+
   Timer? _tick;
   BannerAd? _bannerAd;
   bool _bannerLoaded = false;
+  Timer? _bannerRetryTimer;
+  int _bannerRetryAttempts = 0;
 
   @override
   void initState() {
@@ -1060,26 +1068,43 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         request: const AdRequest(),
         listener: BannerAdListener(
           onAdLoaded: (ad) {
-            // Marca o banner como carregado e libera o espaço do rodapé.
-            if (!mounted) return;
-            setState(() => _bannerLoaded = true);
+            if (!mounted || !identical(_bannerAd, ad)) return;
+            setState(() {
+              _bannerLoaded = true;
+              _bannerRetryAttempts = 0;
+            });
           },
-          onAdFailedToLoad: (ad, _) {
-            // Descarta o anúncio e limpa o estado, liberando o rodapé.
-            ad.dispose();
-            if (mounted) {
-              setState(() {
-                _bannerAd = null;
-                _bannerLoaded = false;
-              });
-            }
-          },
+          onAdFailedToLoad: (ad, _) => _onBannerLoadFailure(ad),
         ),
       );
-      // Guarda a referência antes de carregar: o dispose da tela cobre também
-      // o carregamento pendente.
       _bannerAd = banner;
-      banner.load();
+      try {
+        await banner.load();
+      } catch (error) {
+        debugPrint('Falha ao carregar o anúncio de teste: $error');
+        _onBannerLoadFailure(banner);
+      }
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
+  void _onBannerLoadFailure(Ad ad) {
+    if (!mounted || !identical(_bannerAd, ad)) return;
+    setState(() {
+      _bannerAd = null;
+      _bannerLoaded = false;
+    });
+    unawaited(ad.dispose());
+    _scheduleBannerRetry();
+  }
+
+  void _scheduleBannerRetry() {
+    _bannerRetryTimer?.cancel();
+    if (_bannerRetryAttempts >= _bannerRetryDelays.length) return;
+    final delay = _bannerRetryDelays[_bannerRetryAttempts++];
+    _bannerRetryTimer = Timer(delay, () {
+      _bannerRetryTimer = null;
+      if (mounted) _loadBanner();
     });
   }
 
@@ -1096,6 +1121,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _tick?.cancel();
+    _bannerRetryTimer?.cancel();
     _bannerAd?.dispose();
     super.dispose();
   }
