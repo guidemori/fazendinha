@@ -262,23 +262,26 @@ class Plot {
     final plot = Plot(id: id);
 
     final cropName = map['plantedCrop'] as String?;
-    if (cropName != null) {
-      plot.plantedCrop = CropType.values.firstWhere((c) => c.name == cropName);
-    }
+    if (cropName == null) return plot; // Já está vazio.
 
     final plantedAtStr = map['plantedAt'] as String?;
-    if (plantedAtStr != null) {
-      plot.plantedAt = DateTime.parse(plantedAtStr);
-      final milliseconds = map['growDurationMilliseconds'];
-      final seconds = map['growDurationSeconds'];
+    if (plantedAtStr == null) {
+      // Cultura plantada sem data de plantio: save inconsistente. Descarta o
+      // plantio (opção A) para o canteiro não ficar preso em "crescendo".
+      return plot;
+    }
 
-      if (milliseconds is int) {
-        plot.growDuration = Duration(milliseconds: milliseconds);
-      } else if (seconds is int) {
-        plot.growDuration = Duration(seconds: seconds);
-      } else {
-        plot.growDuration = Crops.of(plot.plantedCrop!).growTime;
-      }
+    plot.plantedCrop = CropType.values.firstWhere((c) => c.name == cropName);
+    plot.plantedAt = DateTime.parse(plantedAtStr);
+    final milliseconds = map['growDurationMilliseconds'];
+    final seconds = map['growDurationSeconds'];
+
+    if (milliseconds is int) {
+      plot.growDuration = Duration(milliseconds: milliseconds);
+    } else if (seconds is int) {
+      plot.growDuration = Duration(seconds: seconds);
+    } else {
+      plot.growDuration = Crops.of(plot.plantedCrop!).growTime;
     }
 
     return plot;

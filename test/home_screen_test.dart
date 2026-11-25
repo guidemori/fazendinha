@@ -22,6 +22,21 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  test('libera canteiro salvo sem data de plantio', () {
+    final player = Player.initial();
+    final saved = player.toMap();
+    final plots = saved['plots'] as List<Map<String, dynamic>>;
+    plots.first['plantedCrop'] = CropType.alface.name;
+    plots.first.remove('plantedAt');
+
+    final restored = Player.fromMap(saved);
+    final plot = restored.plots.first;
+    expect(plot.id, player.plots.first.id);
+    expect(plot.isEmpty, isTrue);
+    expect(restored.plant(plot, Crops.of(CropType.alface), DateTime.utc(2026)),
+        isTrue);
+  });
+
   test('restaura cultivo e upgrades e contabiliza o crescimento offline', () {
     final start = DateTime.utc(2026, 1, 1);
     final player = Player.initial()..coins = 1000;
