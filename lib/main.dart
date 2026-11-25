@@ -682,7 +682,7 @@ class NewPlotTile extends StatelessWidget {
         clipper: const IsoDiamondClipper(),
         clipBehavior: Clip.hardEdge,
         child: GestureDetector(
-          onTap: enabled ? onTap : null,
+          onTap: onTap,
           child: CustomPaint(
             painter: NewPlotPainter(enabled: enabled),
             child: FractionallySizedBox(
@@ -834,12 +834,21 @@ class CropSelectorSheet extends StatelessWidget {
                   final isNew = player.isNewlyUnlocked(type);
 
                   return ListTile(
-                    enabled: unlocked,
-                    leading:
-                        Text(crop.emoji, style: const TextStyle(fontSize: 28)),
+                    leading: Opacity(
+                      opacity: unlocked ? 1.0 : 0.4,
+                      child: Text(
+                        crop.emoji,
+                        style: const TextStyle(fontSize: 28),
+                      ),
+                    ),
                     title: Row(
                       children: [
-                        Text(crop.label),
+                        Text(
+                          crop.label,
+                          style: unlocked
+                              ? null
+                              : const TextStyle(color: Colors.grey),
+                        ),
                         if (isNew) ...[
                           const SizedBox(width: 8),
                           Container(
@@ -884,15 +893,37 @@ class CropSelectorSheet extends StatelessWidget {
                     trailing: unlocked
                         ? const Icon(Icons.chevron_right, color: Colors.green)
                         : const Icon(Icons.lock_outline, color: Colors.grey),
-                    onTap: unlocked && canAfford
-                        ? () {
-                            final ok = player.plant(plot, crop, DateTime.now());
-                            if (ok) {
-                              onPlanted();
-                              Navigator.pop(context);
-                            }
-                          }
-                        : null,
+                    onTap: () {
+                      if (!unlocked) {
+                        ScaffoldMessenger.of(context)
+                          ..hideCurrentSnackBar()
+                          ..showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                'Requer nível ${crop.unlockLevel} para plantar ${crop.label}.',
+                              ),
+                            ),
+                          );
+                        return;
+                      }
+                      if (!canAfford) {
+                        ScaffoldMessenger.of(context)
+                          ..hideCurrentSnackBar()
+                          ..showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                'Moedas insuficientes! Faltam 🪙 ${cost - player.coins}.',
+                              ),
+                            ),
+                          );
+                        return;
+                      }
+                      final ok = player.plant(plot, crop, DateTime.now());
+                      if (ok) {
+                        onPlanted();
+                        Navigator.pop(context);
+                      }
+                    },
                   );
                 },
               ),
@@ -987,12 +1018,28 @@ class _UpgradeTile extends StatelessWidget {
                 ),
               )
             : FilledButton(
-                onPressed: canAfford
-                    ? () {
-                        final ok = player.buyUpgrade(type);
-                        if (ok) onPurchased();
-                      }
-                    : null,
+                style: canAfford
+                    ? null
+                    : FilledButton.styleFrom(
+                        backgroundColor: Colors.grey.shade400,
+                        foregroundColor: Colors.white,
+                      ),
+                onPressed: () {
+                  if (!canAfford) {
+                    ScaffoldMessenger.of(context)
+                      ..hideCurrentSnackBar()
+                      ..showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            'Moedas insuficientes! Faltam 🪙 ${cost - player.coins}.',
+                          ),
+                        ),
+                      );
+                    return;
+                  }
+                  final ok = player.buyUpgrade(type);
+                  if (ok) onPurchased();
+                },
                 child: Text('🪙 $cost'),
               ),
       ),
@@ -1135,8 +1182,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void _handlePlotTap(Plot plot) {
     if (plot.isEmpty) {
       _showCropSelector(plot);
-    } else if (plot.isReady(DateTime.now())) {
-      final reward = widget.player.harvest(plot, DateTime.now());
+      return;
+    }
+
+    final now = DateTime.now();
+    if (plot.isReady(now)) {
+      final reward = widget.player.harvest(plot, now);
       if (reward > 0) {
         widget.onShouldSave?.call();
         ScaffoldMessenger.of(context)
@@ -1146,14 +1197,59 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           );
       }
       setState(() {});
+      return;
     }
+
+    // Canteiro crescendo: em vez de ignorar o toque, informa o tempo restante.
+    final plantedAt = plot.plantedAt;
+    final duration = plot.growDuration;
+    final remaining = (plantedAt == null || duration == null)
+        ? Duration.zero
+        : plantedAt.add(duration).difference(now);
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            '${plot.plantedCrop?.label ?? 'Cultura'} crescendo · falta ${_formatDuration(remaining)}',
+          ),
+        ),
+      );
   }
 
-  void _showCropSelector(Plot plot) {
-    showModalBottomSheet(
+  static String _formatDuration(Duration d) {
+    if (d.isNegative || d.inSeconds <= 0) return 'agora';
+    if (d.inHours >= 1) {
+      final minutes = d.inMinutes % 60;
+      return minutes == 0
+          ? '${d.inHours}h'
+          : '${d.inHours}h${minutes.toString().padLeft(2, '0')}min';
+    }
+    if (d.inMinutes >= 1) {
+      final seconds = d.inSeconds % 60;
+      return seconds == 0
+          ? '${d.inMinutes}min'
+          : '${d.inMinutes}min${seconds.toString().padLeft(2, '0')}s';
+    }
+    return '${d.inSeconds}s';
+  }
+
+  void _showFarmSheet({required WidgetBuilder builder}) {
+    showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
+      builder: (context) => ScaffoldMessenger(
+        child: Scaffold(
+          backgroundColor: Colors.transparent,
+          body: Builder(builder: builder),
+        ),
+      ),
+    );
+  }
+
+  void _showCropSelector(Plot plot) {
+    _showFarmSheet(
       builder: (context) => CropSelectorSheet(
         player: widget.player,
         plot: plot,
@@ -1166,10 +1262,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _showUpgrades() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
+    _showFarmSheet(
       builder: (context) => StatefulBuilder(
         builder: (context, setSheetState) => UpgradeSheet(
           player: widget.player,
@@ -1184,15 +1277,28 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _buyNewPlot() {
-    final ok = widget.player.buyPlot();
-    if (ok) {
-      widget.onShouldSave?.call();
-    } else {
+    if (!widget.player.canBuyMorePlots) {
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(
           const SnackBar(
-              content: Text('Moedas insuficientes para novo canteiro!')),
+              content: Text('Fazenda no limite máximo de canteiros!')),
+        );
+      return;
+    }
+
+    final ok = widget.player.buyPlot();
+    if (ok) {
+      widget.onShouldSave?.call();
+    } else {
+      final missingCoins = widget.player.nextPlotCost - widget.player.coins;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+                'Moedas insuficientes! Faltam 🪙 $missingCoins para o novo canteiro.'),
+          ),
         );
     }
     setState(() {});

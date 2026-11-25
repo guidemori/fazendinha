@@ -1,5 +1,5 @@
 import 'package:fazendinhaidle/main.dart';
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -19,6 +19,55 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(CropSelectorSheet), findsOneWidget);
     expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('mostra o motivo de ações indisponíveis em paisagem',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(844, 390);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final player = Player.initial()..coins = 0;
+    final growingPlot = player.plots.last;
+    growingPlot.plantedCrop = CropType.alface;
+    growingPlot.plantedAt = DateTime.now();
+    growingPlot.growDuration = const Duration(minutes: 10);
+
+    await tester.pumpWidget(FazendinhaApp(player: player));
+    await tester.tap(find.byType(PlotWidget).last);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Alface crescendo · falta'), findsOneWidget);
+
+    await tester.tap(find.byType(NewPlotTile));
+    await tester.pumpAndSettle();
+    expect(
+        find.text('Moedas insuficientes! Faltam 🪙 100 para o novo canteiro.'),
+        findsOneWidget);
+
+    await tester.tap(find.byType(PlotWidget).first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Cenoura'));
+    await tester.pumpAndSettle();
+    expect(find.text('Requer nível 2 para plantar Cenoura.').hitTestable(),
+        findsOneWidget);
+
+    await tester.tap(find.text('Alface'));
+    await tester.pumpAndSettle();
+    expect(find.text('Moedas insuficientes! Faltam 🪙 5.').hitTestable(),
+        findsOneWidget);
+    expect(player.plots.first.isEmpty, isTrue);
+
+    Navigator.of(tester.element(find.byType(CropSelectorSheet))).pop();
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Upgrades'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, '🪙 100'));
+    await tester.pumpAndSettle();
+    expect(find.text('Moedas insuficientes! Faltam 🪙 100.').hitTestable(),
+        findsOneWidget);
+    expect(player.coins, 0);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
