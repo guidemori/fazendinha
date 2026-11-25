@@ -212,6 +212,47 @@ class Plot {
   DateTime? plantedAt;
   Duration? growDuration;
   bool tilled = true;
+  DateTime? wateredAt;
+
+  static const wateringDuration = Duration(seconds: 3);
+  static const plantingDuration = Duration(seconds: 2);
+  static const harvestWindow = Duration(hours: 48);
+
+  bool isWatering(DateTime now) => wateredAt?.isAfter(now) ?? false;
+  bool isWet(DateTime now) => wateredAt != null && !isWatering(now);
+  bool isPlanting(DateTime now) => plantedAt?.isAfter(now) ?? false;
+
+  double health(DateTime now) {
+    final at = plantedAt;
+    final duration = growDuration;
+    if (at == null || duration == null) return 0;
+    final elapsed = now.difference(at.add(duration)).inMilliseconds;
+    return (1 - elapsed / harvestWindow.inMilliseconds).clamp(0.0, 1.0);
+  }
+
+  bool isDead(DateTime now) => isPlanted && health(now) == 0;
+
+  bool water(DateTime now) {
+    if (!tilled || isPlanted || wateredAt != null) return false;
+    wateredAt = now.add(wateringDuration);
+    return true;
+  }
+
+  bool hoe(DateTime now) {
+    if (isPlanted && !isDead(now)) return false;
+    if (tilled && isEmpty) return false;
+    clear();
+    tilled = true;
+    return true;
+  }
+
+  void clear() {
+    plantedCrop = null;
+    plantedAt = null;
+    growDuration = null;
+    wateredAt = null;
+    tilled = false;
+  }
 
   bool get isEmpty => plantedCrop == null;
   bool get isPlanted => plantedCrop != null;
@@ -221,7 +262,7 @@ class Plot {
     final at = plantedAt;
     final duration = growDuration;
     if (crop == null || at == null || duration == null) return false;
-    return !now.isBefore(at.add(duration));
+    return !now.isBefore(at.add(duration)) && !isDead(now);
   }
 
   double progress(DateTime now) {
@@ -253,6 +294,7 @@ class Plot {
   Map<String, dynamic> toMap() => {
         'id': id,
         'tilled': tilled,
+        'wateredAt': wateredAt?.toIso8601String(),
         'plantedCrop': plantedCrop?.name,
         'plantedAt': plantedAt?.toIso8601String(),
         'growDurationSeconds': growDuration?.inSeconds,
@@ -263,6 +305,8 @@ class Plot {
     final id = map['id'] as String? ?? 'plot_0';
     final plot = Plot(id: id)..tilled = map['tilled'] != false;
 
+    final wet = map['wateredAt'];
+    plot.wateredAt = wet is String ? DateTime.tryParse(wet) : null;
     final cropName = map['plantedCrop'] as String?;
     if (cropName == null) return plot; // Já está vazio.
 
@@ -350,6 +394,55 @@ class Player {
   int seedDiscountLevel;
   int growSpeedLevel;
   final Map<CropType, int> basket = {};
+  final Map<CropType, int> seeds = {};
+  static const visitDayLimit = 7;
+  int visitDays = 0;
+  int claimedVisitDays = 0;
+  int? lastVisitDay;
+
+  int get currentLevelXp => xp - xpThresholds[level - 1];
+  int? get levelXpGoal {
+    final next = nextLevelXp;
+    return next == null ? null : next - xpThresholds[level - 1];
+  }
+
+  bool recordVisit(DateTime now) {
+    final local = now.toLocal();
+    final day = DateTime.utc(local.year, local.month, local.day)
+        .difference(DateTime.utc(1970))
+        .inDays;
+    if (visitDays >= visitDayLimit || (lastVisitDay ?? -1) >= day) return false;
+    lastVisitDay = day;
+    visitDays++;
+    return true;
+  }
+
+  static int visitCoins(int day) => 12 * day;
+
+  bool claimVisitReward(int day) {
+    if (day != claimedVisitDays + 1 || day > visitDays) return false;
+    coins += visitCoins(day);
+    seeds.update(CropType.alface, (amount) => amount + day,
+        ifAbsent: () => day);
+    claimedVisitDays = day;
+    return true;
+  }
+
+  bool buySeed(CropType type) {
+    if (!isUnlocked(type)) return false;
+    final cost = effectiveSeedCost(Crops.of(type));
+    if (coins < cost) return false;
+    coins -= cost;
+    seeds.update(type, (amount) => amount + 1, ifAbsent: () => 1);
+    return true;
+  }
+
+  int sellCrop(CropType type) {
+    final amount = basket.remove(type) ?? 0;
+    final proceeds = amount * effectiveSellValue(Crops.of(type));
+    coins += proceeds;
+    return proceeds;
+  }
 
   int get basketCount =>
       basket.values.fold(0, (total, amount) => total + amount);
@@ -447,14 +540,18 @@ class Player {
   }
 
   bool plant(Plot plot, Crop crop, DateTime now) {
-    if (plot.isPlanted || !plot.tilled) return false;
-    if (!isUnlocked(crop.type)) return false;
-    final cost = effectiveSeedCost(crop);
-    if (coins < cost) return false;
-    coins -= cost;
+    if (plot.isPlanted || !plot.tilled || !plot.isWet(now)) return false;
+    final stock = seeds[crop.type] ?? 0;
+    if (!isUnlocked(crop.type) || stock == 0) return false;
+    if (stock == 1) {
+      seeds.remove(crop.type);
+    } else {
+      seeds[crop.type] = stock - 1;
+    }
     plot.plantedCrop = crop.type;
-    plot.plantedAt = now;
+    plot.plantedAt = now.add(Plot.plantingDuration);
     plot.growDuration = effectiveGrowTime(crop);
+    plot.wateredAt = null;
     return true;
   }
 
@@ -464,10 +561,7 @@ class Player {
     final reward = effectiveSellValue(crop);
     basket.update(crop.type, (amount) => amount + 1, ifAbsent: () => 1);
     xp += reward;
-    plot.tilled = false;
-    plot.plantedCrop = null;
-    plot.plantedAt = null;
-    plot.growDuration = null;
+    plot.clear();
     return reward;
   }
 
@@ -480,6 +574,10 @@ class Player {
 
   Map<String, dynamic> toMap() => {
         'basket': basket.map((type, amount) => MapEntry(type.name, amount)),
+        'seeds': seeds.map((type, amount) => MapEntry(type.name, amount)),
+        'visitDays': visitDays,
+        'claimedVisitDays': claimedVisitDays,
+        'lastVisitDay': lastVisitDay,
         'coins': coins,
         'xp': xp,
         'plotCount': plotCount,
@@ -498,11 +596,20 @@ class Player {
     player.seedDiscountLevel = map['seedDiscountLevel'] as int? ?? 0;
     player.growSpeedLevel = map['growSpeedLevel'] as int? ?? 0;
 
-    final rawBasket = map['basket'];
-    if (rawBasket is Map) {
-      for (final type in CropType.values) {
-        final amount = rawBasket[type.name];
-        if (amount is int && amount > 0) player.basket[type] = amount;
+    player.visitDays = (map['visitDays'] as int? ?? 0).clamp(0, visitDayLimit);
+    player.claimedVisitDays =
+        (map['claimedVisitDays'] as int? ?? 0).clamp(0, player.visitDays);
+    player.lastVisitDay = map['lastVisitDay'] as int?;
+    for (final (key, inventory) in [
+      ('basket', player.basket),
+      ('seeds', player.seeds)
+    ]) {
+      final raw = map[key];
+      if (raw is Map) {
+        for (final type in CropType.values) {
+          final count = raw[type.name];
+          if (count is int && count > 0) inventory[type] = count;
+        }
       }
     }
 
@@ -546,11 +653,16 @@ class IsoDiamondClipper extends CustomClipper<Path> {
 /// Pinta a terra arada e o cultivo conforme o estágio de crescimento
 /// (0 = vazio; 1..3 = crescendo; [GameConstants.cropStageCount] = pronta).
 class PlotPainter extends CustomPainter {
-  PlotPainter({required this.stage, required this.ready, required this.tilled});
+  PlotPainter(
+      {required this.stage,
+      required this.ready,
+      required this.tilled,
+      required this.wet});
 
   final int stage;
   final bool ready;
   final bool tilled;
+  final bool wet;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -565,11 +677,13 @@ class PlotPainter extends CustomPainter {
       ..shader = LinearGradient(
         begin: Alignment.topCenter,
         end: Alignment.bottomCenter,
-        colors: !tilled
-            ? const [Color(0xFFAA9467), Color(0xFF7D6B49)]
-            : stage == 0
-                ? const [Color(0xFFBC8A55), Color(0xFF7A4E2F)]
-                : const [Color(0xFF9C7040), Color(0xFF5C4026)],
+        colors: wet
+            ? const [Color(0xff744c36), Color(0xff3e382e)]
+            : !tilled
+                ? const [Color(0xFFAA9467), Color(0xFF7D6B49)]
+                : stage == 0
+                    ? const [Color(0xFFBC8A55), Color(0xFF7A4E2F)]
+                    : const [Color(0xFF9C7040), Color(0xFF5C4026)],
       ).createShader(rect);
     canvas.drawRect(rect, soil);
 
@@ -658,7 +772,8 @@ class PlotPainter extends CustomPainter {
   bool shouldRepaint(PlotPainter oldDelegate) =>
       stage != oldDelegate.stage ||
       ready != oldDelegate.ready ||
-      tilled != oldDelegate.tilled;
+      tilled != oldDelegate.tilled ||
+      wet != oldDelegate.wet;
 }
 
 /// Canteiro individual renderizado como losango isométrico.
@@ -671,16 +786,20 @@ class PlotWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
-    final stage = plot.stage(now);
+    final dead = plot.isDead(now);
+    final stage = dead || plot.isPlanting(now) ? 0 : plot.stage(now);
     final ready = stage == GameConstants.cropStageCount;
-
-    final label = plot.isEmpty
-        ? (plot.tilled
-            ? 'Canteiro pronto para plantar'
-            : 'Canteiro para preparar')
-        : ready
-            ? '${plot.plantedCrop?.label ?? 'Cultura'} pronta para colher'
-            : '${plot.plantedCrop?.label ?? 'Cultura'} crescendo';
+    final label = dead
+        ? 'Planta morta'
+        : plot.isEmpty
+            ? (plot.isWet(now)
+                ? 'Terra úmida'
+                : plot.tilled
+                    ? 'Terra seca'
+                    : 'Terra para preparar')
+            : ready
+                ? '${plot.plantedCrop!.label} pronta para colher'
+                : '${plot.plantedCrop!.label} crescendo';
 
     return Semantics(
       button: true,
@@ -691,9 +810,17 @@ class PlotWidget extends StatelessWidget {
         child: GestureDetector(
           onTap: onTap,
           child: CustomPaint(
-            painter:
-                PlotPainter(stage: stage, ready: ready, tilled: plot.tilled),
-            child: const SizedBox.expand(),
+            painter: PlotPainter(
+                stage: stage,
+                ready: ready,
+                tilled: plot.tilled,
+                wet: plot.isWet(now)),
+            child: SizedBox.expand(
+              child: dead
+                  ? const Center(
+                      child: Icon(Icons.eco, color: Color(0xff443426)))
+                  : null,
+            ),
           ),
         ),
       ),
@@ -859,7 +986,7 @@ class CropSelectorSheet extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             const Text(
-              '🌱 Escolha a cultura',
+              'Loja de sementes',
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 12),
@@ -947,6 +1074,15 @@ class CropSelectorSheet extends StatelessWidget {
                               ),
                             ),
                           );
+                        return;
+                      }
+                      if (!canAfford) {
+                        ScaffoldMessenger.of(context)
+                          ..hideCurrentSnackBar()
+                          ..showSnackBar(SnackBar(
+                            content: Text(
+                                'Moedas insuficientes! Faltam ${cost - player.coins}.'),
+                          ));
                         return;
                       }
                       onSelected(type);
@@ -1092,10 +1228,12 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-enum _FarmTool { hoe, seed, harvest }
+enum _FarmTool { inspect, hoe, seed, water, harvest }
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
-  _FarmTool _tool = _FarmTool.seed;
+  _FarmTool _tool = _FarmTool.inspect;
+  Plot? _focusedPlot;
+  String? _plotHint;
   CropType _seed = CropType.alface;
 
   /// Banner de teste do Google AdMob (Android).
@@ -1230,55 +1368,119 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void _handlePlotTap(Plot plot) {
     final player = widget.player;
     final now = DateTime.now();
-
-    if (_tool == _FarmTool.harvest && plot.isReady(now)) {
-      final label = plot.plantedCrop!.label;
-      final xp = player.harvest(plot, now);
-      _farmChanged();
-      _showFarmMessage('$label no cesto · +$xp XP');
-      return;
+    String? hint;
+    final changed = switch (_tool) {
+      _FarmTool.inspect => false,
+      _FarmTool.hoe => plot.hoe(now),
+      _FarmTool.water => plot.water(now),
+      _FarmTool.seed => player.plant(plot, Crops.of(_seed), now),
+      _FarmTool.harvest => player.harvest(plot, now) > 0,
+    };
+    if (!changed &&
+        _tool == _FarmTool.seed &&
+        plot.isEmpty &&
+        plot.isWet(now) &&
+        (player.seeds[_seed] ?? 0) == 0) {
+      hint = 'Sem sementes de ${_seed.label} · abra a Loja';
     }
-    if (plot.isPlanted) {
-      if (plot.isReady(now)) {
-        _showFarmMessage('Selecione Colher para recolher a cultura.');
-      } else {
-        final end = plot.plantedAt?.add(plot.growDuration ?? Duration.zero);
-        final remaining = end?.difference(now) ?? Duration.zero;
-        _showFarmMessage(
-          '${plot.plantedCrop!.label} crescendo · falta ${_formatDuration(remaining)}',
-        );
-      }
-      return;
-    }
-
-    switch (_tool) {
-      case _FarmTool.hoe:
-        if (!plot.tilled) {
-          plot.tilled = true;
-          _farmChanged();
-        }
-      case _FarmTool.seed:
-        if (!plot.tilled) {
-          _showFarmMessage('Prepare a terra antes de plantar.');
-          return;
-        }
-        final crop = Crops.of(_seed);
-        if (player.plant(plot, crop, now)) {
-          _farmChanged();
-        } else {
-          final missing = player.effectiveSeedCost(crop) - player.coins;
-          _showFarmMessage('Moedas insuficientes! Faltam $missing.');
-        }
-      case _FarmTool.harvest:
-        _showFarmMessage('Este canteiro está vazio.');
-    }
+    if (changed) widget.onShouldSave?.call();
+    setState(() {
+      _focusedPlot = plot;
+      _plotHint = hint;
+    });
   }
 
-  void _sellBasket() {
-    final proceeds = widget.player.sellBasket();
-    if (proceeds == 0) return;
-    _farmChanged();
-    _showFarmMessage('Cesto vendido por $proceeds moedas.');
+  void _showFarmDialog(String title, Widget Function(StateSetter) content) {
+    showDialog<void>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, update) => AlertDialog(
+          title: Text(title),
+          content: SizedBox(
+              width: 480, child: SingleChildScrollView(child: content(update))),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Fechar'))
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showWarehouse() {
+    final player = widget.player;
+    _showFarmDialog(
+        'Armazém',
+        (update) => Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (player.basket.isEmpty)
+                  const Text('A colheita ainda está vazia.'),
+                for (final entry in player.basket.entries)
+                  ListTile(
+                    leading: const Icon(Icons.inventory_2_outlined),
+                    title: Text(entry.key.label),
+                    subtitle: Text('Quantidade: ${entry.value}'),
+                    trailing: TextButton(
+                      onPressed: () {
+                        player.sellCrop(entry.key);
+                        _farmChanged();
+                        update(() {});
+                      },
+                      child: Text(
+                          'Vender por ${entry.value * player.effectiveSellValue(Crops.of(entry.key))}'),
+                    ),
+                  ),
+                if (player.basket.isNotEmpty)
+                  FilledButton(
+                    onPressed: () {
+                      player.sellBasket();
+                      _farmChanged();
+                      update(() {});
+                    },
+                    child: Text('Vender tudo por ${player.basketValue}'),
+                  ),
+              ],
+            ));
+  }
+
+  void _showVisits() {
+    final player = widget.player;
+    if (player.recordVisit(DateTime.now())) _farmChanged();
+    _showFarmDialog(
+        'Visitas de 7 dias',
+        (update) => Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                LinearProgressIndicator(
+                    value: player.visitDays / Player.visitDayLimit),
+                Text(
+                    '${player.visitDays}/${Player.visitDayLimit} dias registrados'),
+                for (var day = 1; day <= Player.visitDayLimit; day++)
+                  ListTile(
+                    title: Text('Dia $day'),
+                    subtitle: Text(
+                        '${Player.visitCoins(day)} moedas · $day sementes de alface'),
+                    trailing: TextButton(
+                      onPressed: day == player.claimedVisitDays + 1 &&
+                              day <= player.visitDays
+                          ? () {
+                              if (player.claimVisitReward(day)) {
+                                _farmChanged();
+                                update(() {});
+                              }
+                            }
+                          : null,
+                      child: Text(day <= player.claimedVisitDays
+                          ? 'Resgatado'
+                          : day <= player.visitDays
+                              ? 'Resgatar'
+                              : 'Aguardando'),
+                    ),
+                  ),
+              ],
+            ));
   }
 
   static String _formatDuration(Duration d) {
@@ -1312,14 +1514,40 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-  void _showCropSelector() {
+  void _showSeeds() {
+    final player = widget.player;
+    _showFarmDialog(
+        'Sementes guardadas',
+        (_) => Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (player.seeds.isEmpty)
+                  const Text(
+                      'Compre sementes na Loja ou resgate uma recompensa de visita.'),
+                for (final entry in player.seeds.entries)
+                  ListTile(
+                    title: Text(entry.key.label),
+                    subtitle: Text('Quantidade: ${entry.value}'),
+                    onTap: () {
+                      Navigator.of(context).pop();
+                      setState(() {
+                        _seed = entry.key;
+                        _tool = _FarmTool.seed;
+                        _plotHint = null;
+                      });
+                    },
+                  ),
+              ],
+            ));
+  }
+
+  void _showShop() {
     _showFarmSheet(
       builder: (context) => CropSelectorSheet(
         player: widget.player,
-        onSelected: (seed) => setState(() {
-          _seed = seed;
-          _tool = _FarmTool.seed;
-        }),
+        onSelected: (seed) {
+          if (widget.player.buySeed(seed)) _farmChanged();
+        },
       ),
     );
   }
@@ -1378,6 +1606,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             player: player,
             onPlotTap: _handlePlotTap,
             onBuyPlot: _buyNewPlot,
+            focusedPlot: _focusedPlot,
+            plotHint: _plotHint,
           ),
           SafeArea(
             minimum: const EdgeInsets.all(8),
@@ -1397,6 +1627,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             color: Color(0xffffd167), size: 17),
                         const SizedBox(width: 5),
                         Text('${player.coins}'),
+                        TextButton(
+                            onPressed: _showWarehouse,
+                            child: Text('Armazém ${player.basketCount}')),
+                        TextButton(
+                            onPressed: _showShop, child: const Text('Loja')),
+                        IconButton(
+                          tooltip: 'Visitas de 7 dias',
+                          icon: const Icon(Icons.card_giftcard, size: 20),
+                          onPressed: _showVisits,
+                        ),
                         IconButton(
                           icon: const Icon(Icons.trending_up, size: 20),
                           tooltip: 'Melhorias',
@@ -1414,21 +1654,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          _toolButton(
-                              _FarmTool.hoe, Icons.handyman, 'Preparar'),
-                          _toolButton(_FarmTool.seed, Icons.eco, 'Plantar'),
-                          TextButton(
-                            onPressed: _showCropSelector,
-                            child: Text(_seed.label),
+                          _toolButton(_FarmTool.inspect, Icons.touch_app,
+                              'Inspecionar'),
+                          _toolButton(_FarmTool.hoe, Icons.handyman, 'Enxada'),
+                          TextButton.icon(
+                            onPressed: _showSeeds,
+                            icon: const Icon(Icons.eco, size: 17),
+                            label: Text(_tool == _FarmTool.seed
+                                ? '${_seed.label} · ${player.seeds[_seed] ?? 0}'
+                                : 'Sementes'),
                           ),
+                          _toolButton(
+                              _FarmTool.water, Icons.water_drop, 'Regar'),
                           _toolButton(
                               _FarmTool.harvest, Icons.agriculture, 'Colher'),
-                          TextButton.icon(
-                            onPressed:
-                                player.basketCount > 0 ? _sellBasket : null,
-                            icon: const Icon(Icons.shopping_basket, size: 17),
-                            label: Text('Vender ${player.basketCount}'),
-                          ),
                         ],
                       ),
                     ),
@@ -1500,7 +1739,7 @@ class _LevelStatus extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final target = player.nextLevelXp;
+    final target = player.levelXpGoal;
     return SizedBox(
       width: 146,
       child: Padding(
@@ -1515,7 +1754,9 @@ class _LevelStatus extends StatelessWidget {
                 children: [
                   Text('Nível ${player.level}'),
                   const SizedBox(width: 12),
-                  Text(target == null ? 'Máx.' : '${player.xp}/$target XP'),
+                  Text(target == null
+                      ? 'Máx.'
+                      : '${player.currentLevelXp}/$target XP'),
                 ],
               ),
             ),
@@ -1548,11 +1789,15 @@ class _FarmScene extends StatelessWidget {
     required this.player,
     required this.onPlotTap,
     required this.onBuyPlot,
+    required this.focusedPlot,
+    required this.plotHint,
   });
 
   final Player player;
   final void Function(Plot plot) onPlotTap;
   final VoidCallback onBuyPlot;
+  final Plot? focusedPlot;
+  final String? plotHint;
 
   @override
   Widget build(BuildContext context) {
@@ -1598,6 +1843,8 @@ class _FarmScene extends StatelessWidget {
           return screenCenter.dy + (c.dy - isoCenter.dy) * scale - tileH / 2;
         }
 
+        final focus =
+            player.plots.indexWhere((plot) => identical(plot, focusedPlot));
         return ColoredBox(
           color: const Color(0xFF253F29),
           child: Stack(
@@ -1632,10 +1879,84 @@ class _FarmScene extends StatelessWidget {
                     onTap: onBuyPlot,
                   ),
                 ),
+              if (focus >= 0)
+                Positioned(
+                  width: 192,
+                  left: (leftFor(focus) + tileW / 2 - 96)
+                      .clamp(4.0, math.max(4.0, w - 196)),
+                  top: math.max(52.0, topFor(focus) - 68),
+                  child: IgnorePointer(
+                    child:
+                        _PlotNotice(plot: player.plots[focus], hint: plotHint),
+                  ),
+                ),
             ],
           ),
         );
       },
+    );
+  }
+}
+
+class _PlotNotice extends StatelessWidget {
+  const _PlotNotice({required this.plot, required this.hint});
+
+  final Plot plot;
+  final String? hint;
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final String label;
+    double? progress;
+    String? details;
+    if (hint != null) {
+      label = hint!;
+    } else if (plot.isWatering(now) || plot.isPlanting(now)) {
+      final watering = plot.isWatering(now);
+      final end = watering ? plot.wateredAt! : plot.plantedAt!;
+      final duration = watering ? Plot.wateringDuration : Plot.plantingDuration;
+      label = watering ? 'Regando terra…' : 'Plantando semente…';
+      progress =
+          (1 - end.difference(now).inMilliseconds / duration.inMilliseconds)
+              .clamp(0.0, 1.0);
+    } else if (plot.isDead(now)) {
+      label = 'Planta morta · limpe com a enxada';
+    } else if (plot.isPlanted) {
+      final health = (plot.health(now) * 100).ceil();
+      final end = plot.plantedAt!.add(plot.growDuration!);
+      final remaining = end.difference(now);
+      label = plot.isReady(now)
+          ? '${plot.plantedCrop!.label} pronta para colher'
+          : '${plot.plantedCrop!.label} crescendo';
+      details =
+          'Saúde $health/100${remaining.isNegative ? '' : ' · ${_HomeScreenState._formatDuration(remaining)}'}';
+      progress = plot.progress(now);
+    } else if (!plot.tilled) {
+      label = 'Use a enxada para preparar';
+    } else {
+      label = plot.isWet(now)
+          ? 'Terra úmida · pronta para plantar'
+          : 'Terra seca · regue antes de plantar';
+    }
+    return _FarmPanel(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 7),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(label,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 12)),
+            if (details != null)
+              Text(details, style: const TextStyle(fontSize: 11)),
+            if (progress != null) ...[
+              const SizedBox(height: 4),
+              LinearProgressIndicator(value: progress, minHeight: 4),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }
@@ -1697,6 +2018,7 @@ class _FazendinhaAppState extends State<FazendinhaApp>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    if (widget.player.recordVisit(DateTime.now())) unawaited(_save());
     _saveTimer = Timer.periodic(
       const Duration(seconds: GameConstants.autoSaveSeconds),
       (_) => _save(),
@@ -1726,6 +2048,11 @@ class _FazendinhaAppState extends State<FazendinhaApp>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed &&
+        widget.player.recordVisit(DateTime.now())) {
+      setState(() {});
+      unawaited(_save());
+    }
     final isBackground = state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive ||
         state == AppLifecycleState.detached;

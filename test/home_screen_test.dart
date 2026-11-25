@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('planta direto e completa o ciclo de colher, vender e preparar',
+  testWidgets('rega, planta, colhe no armazém e vende em paisagem',
       (tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(844, 390);
@@ -13,132 +13,135 @@ void main() {
     final player = Player.initial();
     await tester.pumpWidget(FazendinhaApp(player: player));
     await tester.pumpAndSettle();
+    final tile = find.byType(PlotWidget).first;
+    final plot = player.plots.first;
+    await tester.tap(tile);
+    await tester.pump();
+    expect(find.text('Terra seca · regue antes de plantar'), findsOneWidget);
 
-    final plots = find.byType(PlotWidget);
-    expect(plots, findsNWidgets(4));
+    await tester.tap(find.text('Regar'));
+    await tester.tap(tile);
+    await tester.pump();
+    expect(find.text('Regando terra…'), findsOneWidget);
+    plot.wateredAt = DateTime.now().subtract(const Duration(seconds: 1));
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text('Terra úmida · pronta para plantar'), findsOneWidget);
+
+    await tester.tap(find.text('Loja'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Alface'));
     await tester.pumpAndSettle();
-    expect(find.byType(CropSelectorSheet), findsOneWidget);
-    await tester.tap(find.text('Alface').last);
+    expect(player.coins, 10);
+    expect(player.seeds[CropType.alface], 1);
+    await tester.tap(find.text('Sementes'));
     await tester.pumpAndSettle();
-    await tester.tap(plots.first);
+    await tester.tap(find.text('Alface'));
+    await tester.pumpAndSettle();
+    await tester.tap(tile);
     await tester.pump();
-    await tester.tap(plots.at(1));
-    await tester.pump();
-    expect(find.byType(CropSelectorSheet), findsNothing);
-    expect(player.coins, 5);
-    final first = player.plots.first;
-    first.plantedAt = DateTime.now().subtract(const Duration(minutes: 1));
+    expect(find.text('Plantando semente…'), findsOneWidget);
+    expect(player.seeds[CropType.alface], isNull);
+    expect(player.coins, 10);
+
+    plot.plantedAt = DateTime.now().subtract(const Duration(minutes: 1));
     await tester.tap(find.text('Colher'));
-    await tester.tap(plots.first);
+    await tester.tap(tile);
     await tester.pump();
-    expect(player.basketCount, 1);
-    expect(player.coins, 5);
     expect(find.text('12/100 XP'), findsOneWidget);
-    expect(first.tilled, isFalse);
-
-    await tester.tap(find.text('Vender 1'));
-    await tester.pump();
+    expect(player.coins, 10);
+    await tester.tap(find.text('Armazém 1'));
+    await tester.pumpAndSettle();
+    expect(find.text('Quantidade: 1'), findsOneWidget);
+    await tester.tap(find.text('Vender por 12'));
+    await tester.pumpAndSettle();
+    expect(player.coins, 22);
     expect(player.basketCount, 0);
-    expect(player.coins, 17);
+    await tester.tap(find.text('Fechar'));
+    await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Preparar'));
-    await tester.tap(plots.first);
+    await tester.tap(find.text('Enxada'));
+    await tester.tap(tile);
     await tester.pump();
-    expect(first.tilled, isTrue);
+    expect(plot.tilled, isTrue);
+    expect(plot.isWet(DateTime.now()), isFalse);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('mostra o motivo de ações indisponíveis em paisagem',
-      (tester) async {
-    tester.view.devicePixelRatio = 1;
+  testWidgets('permite resgatar a primeira visita no aparelho', (tester) async {
     tester.view.physicalSize = const Size(844, 390);
+    tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-
-    final player = Player.initial()..coins = 0;
-    final growingPlot = player.plots.last;
-    growingPlot.plantedCrop = CropType.alface;
-    growingPlot.plantedAt = DateTime.now();
-    growingPlot.growDuration = const Duration(minutes: 10);
-
+    final player = Player.initial();
     await tester.pumpWidget(FazendinhaApp(player: player));
-    await tester.tap(find.byType(PlotWidget).last);
     await tester.pumpAndSettle();
-    expect(find.textContaining('Alface crescendo · falta'), findsOneWidget);
-
-    await tester.tap(find.byType(NewPlotTile));
+    await tester.tap(find.byTooltip('Visitas de 7 dias'));
     await tester.pumpAndSettle();
-    expect(
-        find.text('Moedas insuficientes! Faltam 🪙 100 para o novo canteiro.'),
-        findsOneWidget);
-
-    await tester.tap(find.text('Alface'));
+    expect(find.text('1/7 dias registrados'), findsOneWidget);
+    await tester.tap(find.text('Resgatar'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Cenoura'));
-    await tester.pumpAndSettle();
-    expect(find.text('Requer nível 2 para plantar Cenoura.').hitTestable(),
-        findsOneWidget);
-
-    Navigator.of(tester.element(find.byType(CropSelectorSheet))).pop();
-    await tester.pumpAndSettle();
-    await tester.tap(find.byType(PlotWidget).first);
-    await tester.pumpAndSettle();
-    expect(find.text('Moedas insuficientes! Faltam 5.'), findsOneWidget);
-    expect(player.plots.first.isEmpty, isTrue);
-
-    await tester.tap(find.byTooltip('Melhorias'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, '🪙 100'));
-    await tester.pumpAndSettle();
-    expect(find.text('Moedas insuficientes! Faltam 🪙 100.').hitTestable(),
-        findsOneWidget);
-    expect(player.coins, 0);
+    expect(find.text('Resgatado'), findsOneWidget);
+    expect(player.coins, 27);
+    expect(player.seeds[CropType.alface], 1);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  test('libera canteiro salvo sem data de plantio', () {
+  test('rega persiste, e a enxada libera semente morta após prazo offline', () {
+    final start = DateTime.utc(2026, 1, 1);
     final player = Player.initial();
-    final saved = player.toMap();
-    final plots = saved['plots'] as List<Map<String, dynamic>>;
-    plots.first['plantedCrop'] = CropType.alface.name;
-    plots.first.remove('plantedAt');
-
-    final restored = Player.fromMap(saved);
-    final plot = restored.plots.first;
-    expect(plot.id, player.plots.first.id);
-    expect(plot.isEmpty, isTrue);
-    expect(restored.plant(plot, Crops.of(CropType.alface), DateTime.utc(2026)),
-        isTrue);
+    final crop = Crops.of(CropType.alface);
+    final plot = player.plots.first;
+    expect(player.buySeed(crop.type), isTrue);
+    expect(player.plant(plot, crop, start), isFalse);
+    expect(plot.water(start), isTrue);
+    final restored = Player.fromMap(player.toMap());
+    final wetPlot = restored.plots.first;
+    expect(wetPlot.isWatering(start), isTrue);
+    final wetAt = start.add(Plot.wateringDuration);
+    expect(restored.plant(wetPlot, crop, wetAt), isTrue);
+    final readyAt = wetAt.add(Plot.plantingDuration).add(crop.growTime);
+    expect(wetPlot.isReady(readyAt), isTrue);
+    expect(wetPlot.hoe(readyAt), isFalse);
+    final expiry = readyAt.add(Plot.harvestWindow);
+    expect(wetPlot.isDead(expiry), isTrue);
+    expect(restored.harvest(wetPlot, expiry), 0);
+    expect(wetPlot.hoe(expiry), isTrue);
+    expect(wetPlot.isEmpty, isTrue);
+    expect(wetPlot.isWet(expiry), isFalse);
   });
 
-  test('restaura cultivo e upgrades e contabiliza o crescimento offline', () {
-    final start = DateTime.utc(2026, 1, 1);
-    final player = Player.initial()..coins = 1000;
-    expect(player.buyPlot(), isTrue);
-    expect(player.buyUpgrade(UpgradeType.sellBoost), isTrue);
-    final crop = Crops.of(CropType.alface);
-    expect(player.plant(player.plots.first, crop, start), isTrue);
-
+  test('recompensas crescem e cada data e resgate contam uma vez', () {
+    final first = DateTime(2026, 1, 1, 10);
+    final player = Player.initial();
+    expect(player.recordVisit(first), isTrue);
+    expect(player.claimVisitReward(1), isTrue);
+    expect(player.claimVisitReward(1), isFalse);
+    expect(player.recordVisit(first.add(const Duration(hours: 2))), isFalse);
     final restored = Player.fromMap(player.toMap());
-    expect(restored.plotCount, 5);
-    expect(restored.sellBoostLevel, 1);
-    expect(restored.harvest(restored.plots.first, start), 0);
-    final ready = start.add(crop.growTime);
-    expect(restored.harvest(restored.plots.first, ready),
-        restored.effectiveSellValue(crop));
-    final plot = restored.plots.first;
-    expect(plot.isEmpty, isTrue);
-    expect(plot.tilled, isFalse);
-    expect(restored.plant(plot, crop, ready), isFalse);
-    expect(restored.basketCount, 1);
-    expect(restored.levelProgress, closeTo(.14, .01));
-    final reloaded = Player.fromMap(restored.toMap());
-    expect(reloaded.plots.first.tilled, isFalse);
-    final coins = reloaded.coins;
-    expect(reloaded.sellBasket(), reloaded.effectiveSellValue(crop));
-    expect(reloaded.coins, coins + reloaded.effectiveSellValue(crop));
-    expect(reloaded.basketCount, 0);
+    expect(restored.recordVisit(first), isFalse);
+    expect(restored.recordVisit(first.add(const Duration(days: 1))), isTrue);
+    expect(restored.claimVisitReward(2), isTrue);
+    expect(restored.coins, 15 + 12 + 24);
+    expect(restored.seeds[CropType.alface], 3);
+  });
+
+  test('restaura estoque, solo e progresso de XP com saves anteriores', () {
+    final player = Player.initial()..xp = 140;
+    final data = player.toMap()
+      ..remove('seeds')
+      ..remove('visitDays');
+    final plots = data['plots'] as List<Map<String, dynamic>>;
+    plots.first
+      ..remove('wateredAt')
+      ..['plantedCrop'] = CropType.alface.name
+      ..remove('plantedAt');
+    final restored = Player.fromMap(data);
+    expect(restored.plots.first.isEmpty, isTrue);
+    expect(restored.plots.first.isWet(DateTime.now()), isFalse);
+    expect(restored.seeds, isEmpty);
+    expect(restored.currentLevelXp, 40);
+    expect(restored.levelXpGoal, 200);
+    expect(restored.levelProgress, .2);
   });
 }
