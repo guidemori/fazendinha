@@ -1058,9 +1058,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             width);
       } catch (error) {
         debugPrint('Falha ao calcular o tamanho do anúncio de teste: $error');
+        _scheduleBannerRetry();
         return;
       }
-      if (adSize == null || !mounted) return;
+      if (!mounted) return;
+      if (adSize == null) {
+        _scheduleBannerRetry();
+        return;
+      }
 
       final banner = BannerAd(
         adUnitId: _bannerAdUnitId,
@@ -1099,6 +1104,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _scheduleBannerRetry() {
+    if (!mounted) return;
     _bannerRetryTimer?.cancel();
     if (_bannerRetryAttempts >= _bannerRetryDelays.length) return;
     final delay = _bannerRetryDelays[_bannerRetryAttempts++];
