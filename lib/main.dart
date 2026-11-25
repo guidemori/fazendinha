@@ -25,6 +25,7 @@ class FazendinhaApp extends StatelessWidget {
       title: 'Fazendinha Idle',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
+        fontFamily: 'FarmRoboto',
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF4CAF50)),
         useMaterial3: true,
       ),
