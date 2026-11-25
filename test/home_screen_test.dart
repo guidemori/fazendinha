@@ -191,6 +191,25 @@ void main() {
     expect(restored.seeds[CropType.alface], 3);
   });
 
+  test('visita exige outra data e intervalo de 23 horas após restaurar', () {
+    final first = DateTime(2026, 1, 1, 23);
+    final player = Player.initial();
+    expect(player.recordVisit(first), isTrue);
+
+    final restored = Player.fromMap(player.toMap());
+    expect(restored.recordVisit(first.add(const Duration(hours: 1))), isFalse);
+    expect(
+        restored.recordVisit(first.subtract(const Duration(days: 1))), isFalse);
+    final next = first.add(Player.minVisitGap);
+    expect(restored.recordVisit(next), isTrue);
+    expect(restored.visitDays, 2);
+
+    final legacy = Player.fromMap(player.toMap()..remove('lastVisitAbsolute'));
+    expect(legacy.recordVisit(first), isFalse);
+    expect(legacy.recordVisit(first.add(const Duration(hours: 1))), isTrue);
+    expect(legacy.lastVisitAbsolute, isNotNull);
+  });
+
   test('restaura estoque, solo e progresso de XP com saves anteriores', () {
     final player = Player.initial()..xp = 140;
     final data = player.toMap()

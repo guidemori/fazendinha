@@ -12,8 +12,9 @@ em crescimento. Cada aplicação consome uma unidade e reduz em 25% o tempo
 que ainda falta para amadurecer.
 
 Use **Colher** para ganhar XP e enviar a produção ao **Armazém**, onde você
-pode vender por espécie ou vender tudo. **Visitas de 7 dias** registra uma data
-local por dia de acesso e libera recompensas crescentes em moedas e sementes.
+pode vender por espécie ou vender tudo. **Visitas de 7 dias** libera
+recompensas crescentes em moedas e sementes. Cada nova visita exige outra
+data local e um intervalo mínimo de 23 horas pelo relógio do aparelho.
 
 O jogo abre em paisagem. O progresso é salvo no Hive e o crescimento usa o
 tempo decorrido desde o plantio, incluindo o tempo com o aplicativo fechado.

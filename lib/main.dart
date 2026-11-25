@@ -240,7 +240,7 @@ class Plot {
     return (1 - elapsed / window.inMilliseconds).clamp(0.0, 1.0);
   }
 
-  bool isDead(DateTime now) => isPlanted && health(now) == 0;
+  bool isDead(DateTime now) => isPlanted && health(now) <= 0;
 
   bool water(DateTime now) {
     if (!tilled || isPlanted || wateredAt != null) return false;
@@ -408,9 +408,11 @@ class Player {
   static const fertilizerCost = 8;
   int fertilizer = 0;
   static const visitDayLimit = 7;
+  static const minVisitGap = Duration(hours: 23);
   int visitDays = 0;
   int claimedVisitDays = 0;
   int? lastVisitDay;
+  int? lastVisitAbsolute;
 
   int get currentLevelXp => xp - xpThresholds[level - 1];
   int? get levelXpGoal {
@@ -420,23 +422,36 @@ class Player {
 
   bool recordVisit(DateTime now) {
     final local = now.toLocal();
-    final day = DateTime.utc(local.year, local.month, local.day)
+    final absoluteDay = DateTime.utc(local.year, local.month, local.day)
         .difference(DateTime.utc(1970))
         .inDays;
-    if (visitDays >= visitDayLimit || (lastVisitDay ?? -1) >= day) return false;
-    lastVisitDay = day;
+    if (visitDays >= visitDayLimit || (lastVisitDay ?? -1) >= absoluteDay) {
+      return false;
+    }
+    // Anti-cheat parcial (offline): exige um intervalo mínimo entre
+    // visitas segundo o relógio do aparelho. Bloqueia visitas em sequência rápida e recuos de
+    // relógio, mas não distingue espera real de adiantamento ≥ o intervalo.
+    final utcMs = now.toUtc().millisecondsSinceEpoch;
+    final lastMs = lastVisitAbsolute;
+    if (lastMs != null && utcMs - lastMs < minVisitGap.inMilliseconds) {
+      return false;
+    }
+    lastVisitDay = absoluteDay;
+    lastVisitAbsolute = utcMs;
     visitDays++;
     return true;
   }
 
-  static int visitCoins(int day) => 12 * day;
+  static int visitCoins(int visitNumber) => 12 * visitNumber;
 
-  bool claimVisitReward(int day) {
-    if (day != claimedVisitDays + 1 || day > visitDays) return false;
-    coins += visitCoins(day);
-    seeds.update(CropType.alface, (amount) => amount + day,
-        ifAbsent: () => day);
-    claimedVisitDays = day;
+  bool claimVisitReward(int visitNumber) {
+    if (visitNumber != claimedVisitDays + 1 || visitNumber > visitDays) {
+      return false;
+    }
+    coins += visitCoins(visitNumber);
+    seeds.update(CropType.alface, (amount) => amount + visitNumber,
+        ifAbsent: () => visitNumber);
+    claimedVisitDays = visitNumber;
     return true;
   }
 
@@ -457,10 +472,14 @@ class Player {
   }
 
   bool fertilize(Plot plot, DateTime now) {
+    // Só fertiliza cultura em crescimento: ignora canteiro vazio, planta já
+    // madura (pronta para colher ou morta) e plantio ainda em andamento.
+    if (!plot.isPlanted || plot.isReady(now) || plot.isDead(now)) {
+      return false;
+    }
     final plantedAt = plot.plantedAt;
     final duration = plot.growDuration;
     if (fertilizer <= 0 ||
-        !plot.isPlanted ||
         plantedAt == null ||
         duration == null ||
         now.isBefore(plantedAt)) {
@@ -618,6 +637,7 @@ class Player {
         'visitDays': visitDays,
         'claimedVisitDays': claimedVisitDays,
         'lastVisitDay': lastVisitDay,
+        'lastVisitAbsolute': lastVisitAbsolute,
         'coins': coins,
         'xp': xp,
         'plotCount': plotCount,
@@ -642,6 +662,7 @@ class Player {
     player.claimedVisitDays =
         (map['claimedVisitDays'] as int? ?? 0).clamp(0, player.visitDays);
     player.lastVisitDay = map['lastVisitDay'] as int?;
+    player.lastVisitAbsolute = map['lastVisitAbsolute'] as int?;
     for (final (key, inventory) in [
       ('basket', player.basket),
       ('seeds', player.seeds)
