@@ -1,35 +1,1466 @@
+// ============================================================
+// 🌱 LITTLE FARM IDLE — FASE 2 + RODADA ANDROID (arquivo único)
+// ------------------------------------------------------------
+// Cole este conteúdo como: lib/main.dart
+// (substitui toda a estrutura de pastas lib/core, lib/models, lib/ui)
+//
+// Fase 2: expansão de canteiros + upgrades permanentes
+// (venda melhor, semente barata, crescimento rápido) e destaque
+// visual "Novo!" para culturas recém-desbloqueadas.
+//
+// Rodada Android (aparelho físico):
+// • Nome de exibição: Little Farm
+// • AdMob de teste somente no Android (banner + app id de teste do Google)
+// • Tempo offline: crescimento pelo relógio real (DateTime.now)
+// • Persistência: aguarda put + flush a cada gravação
+// • Orientação travada em paisagem
+// ============================================================
+
+import 'dart:async';
+import 'dart:math' as math;
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
-import 'core/game_constants.dart';
-import 'models/player.dart';
-import 'ui/screens/home_screen.dart';
+/// Liga o AdMob apenas em builds Android reais (não na web), usando os IDs
+/// de teste do Google. Nos testes, rode com --dart-define=ENABLE_TEST_ADS=false
+/// para evitar a MissingPluginException do plugin de anúncios.
+bool get _useTestAds =>
+    !kIsWeb &&
+    defaultTargetPlatform == TargetPlatform.android &&
+    const bool.fromEnvironment('ENABLE_TEST_ADS', defaultValue: true);
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  await Hive.initFlutter();
-  await Hive.openBox(GameConstants.hiveBoxName);
+// ------------------------------------------------------------
+// [core/game_constants.dart]  Constantes centrais do jogo
+// ------------------------------------------------------------
+class GameConstants {
+  static const String hiveBoxName = 'fazendinha_idle_box';
+  static const String playerKey = 'player';
 
-  final player = Player.initial(plotCount: GameConstants.startingPlots);
-  runApp(FazendinhaApp(player: player));
+  /// Moedas iniciais: 15 = 3 sementes de alface (5 cada).
+  static const int startingCoins = 15;
+  static const int startingPlots = 4;
+
+  /// Curva de custo dos canteiros: custo = base x fator^quantidade.
+  static const double newPlotBaseCost = 100.0;
+  static const double newPlotGrowthFactor = 1.5;
+  static const int maxPlots = 12;
+
+  /// Intervalo de salvamento automático (segundos).
+  static const int autoSaveSeconds = 30;
+
+  /// Nível máximo de cada upgrade.
+  static const int maxUpgradeLevel = 10;
+
+  /// Geometria do losango isométrico.
+  ///
+  /// [isoTileHalfWidth] é a metade da largura do losango; [isoTileHalfHeight]
+  /// é a metade da altura. A tela translada o "chão" para o centro e desenha
+  /// os losangos a partir de [plotCenterForIndex].
+  static const double isoTileHalfWidth = 56.0;
+  static const double isoTileHalfHeight = 28.0;
+
+  /// Número de colunas da grade de canteiros.
+  static const int gridColumns = 2;
+
+  /// Quantidade de estágios visuais de crescimento (broto → pronto).
+  static const int cropStageCount = 4;
+
+  /// Centro do losango do canteiro [index] no espaço do chão isométrico.
+  ///
+  /// O eixo X cresce para a direita; o Y cresce para baixo. Canteiros
+  /// vizinhos compartilham bordas nos pontos médios dos losangos, o que
+  /// permite tocar inclusive nas bordas sem ambiguidade.
+  static Offset plotCenterForIndex(int index) {
+    final col = index % gridColumns;
+    final row = index ~/ gridColumns;
+    return Offset(
+      (col - row) * isoTileHalfWidth,
+      (col + row) * isoTileHalfHeight,
+    );
+  }
 }
 
-class FazendinhaApp extends StatelessWidget {
-  const FazendinhaApp({super.key, required this.player});
+// ------------------------------------------------------------
+// [models/crop.dart]  Tipos de cultura + dados de cada uma
+// ------------------------------------------------------------
+enum CropType {
+  alface,
+  cenoura,
+  milho,
+  tomate,
+  morango,
+  abobora,
+  cafe,
+  cana;
+
+  String get label => switch (this) {
+        CropType.alface => 'Alface',
+        CropType.cenoura => 'Cenoura',
+        CropType.milho => 'Milho',
+        CropType.tomate => 'Tomate',
+        CropType.morango => 'Morango',
+        CropType.abobora => 'Abóbora',
+        CropType.cafe => 'Café',
+        CropType.cana => 'Cana-de-açúcar',
+      };
+
+  String get emoji => switch (this) {
+        CropType.alface => '🥬',
+        CropType.cenoura => '🥕',
+        CropType.milho => '🌽',
+        CropType.tomate => '🍅',
+        CropType.morango => '🍓',
+        CropType.abobora => '🎃',
+        CropType.cafe => '☕',
+        CropType.cana => '🎋',
+      };
+}
+
+class Crop {
+  const Crop({
+    required this.type,
+    required this.seedCost,
+    required this.sellValue,
+    required this.growTime,
+    required this.unlockLevel,
+  });
+
+  final CropType type;
+  final int seedCost;
+  final int sellValue;
+  final Duration growTime;
+  final int unlockLevel;
+
+  String get emoji => type.emoji;
+  String get label => type.label;
+}
+
+/// Repositório estático com os dados das 8 culturas.
+class Crops {
+  static Crop of(CropType type) => switch (type) {
+        CropType.alface => const Crop(
+            type: CropType.alface,
+            seedCost: 5,
+            sellValue: 12,
+            growTime: Duration(seconds: 30),
+            unlockLevel: 1,
+          ),
+        CropType.cenoura => const Crop(
+            type: CropType.cenoura,
+            seedCost: 25,
+            sellValue: 70,
+            growTime: Duration(minutes: 2),
+            unlockLevel: 2,
+          ),
+        CropType.milho => const Crop(
+            type: CropType.milho,
+            seedCost: 120,
+            sellValue: 350,
+            growTime: Duration(minutes: 10),
+            unlockLevel: 3,
+          ),
+        CropType.tomate => const Crop(
+            type: CropType.tomate,
+            seedCost: 200,
+            sellValue: 550,
+            growTime: Duration(minutes: 15),
+            unlockLevel: 4,
+          ),
+        CropType.morango => const Crop(
+            type: CropType.morango,
+            seedCost: 350,
+            sellValue: 900,
+            growTime: Duration(minutes: 20),
+            unlockLevel: 5,
+          ),
+        CropType.abobora => const Crop(
+            type: CropType.abobora,
+            seedCost: 600,
+            sellValue: 1500,
+            growTime: Duration(minutes: 30),
+            unlockLevel: 6,
+          ),
+        CropType.cafe => const Crop(
+            type: CropType.cafe,
+            seedCost: 1000,
+            sellValue: 2500,
+            growTime: Duration(minutes: 45),
+            unlockLevel: 7,
+          ),
+        CropType.cana => const Crop(
+            type: CropType.cana,
+            seedCost: 1800,
+            sellValue: 4500,
+            growTime: Duration(hours: 1),
+            unlockLevel: 8,
+          ),
+      };
+}
+
+// ------------------------------------------------------------
+// [models/plot.dart]  Um canteiro individual da fazenda
+// ------------------------------------------------------------
+class Plot {
+  Plot({required this.id});
+
+  final String id;
+  CropType? plantedCrop;
+  DateTime? plantedAt;
+  Duration? growDuration;
+
+  bool get isEmpty => plantedCrop == null;
+  bool get isPlanted => plantedCrop != null;
+
+  bool isReady(DateTime now) {
+    final crop = plantedCrop;
+    final at = plantedAt;
+    final duration = growDuration;
+    if (crop == null || at == null || duration == null) return false;
+    return !now.isBefore(at.add(duration));
+  }
+
+  double progress(DateTime now) {
+    final at = plantedAt;
+    final duration = growDuration;
+    if (at == null || duration == null || duration.inMilliseconds == 0) {
+      return 0;
+    }
+    final elapsed = now.difference(at).inMilliseconds;
+    return (elapsed / duration.inMilliseconds).clamp(0.0, 1.0);
+  }
+
+  /// Estágio visual de crescimento, de 1 (broto) a
+  /// [GameConstants.cropStageCount] (maduro/pronto).
+  ///
+  /// Canteiro vazio retorna 0; cultura pronta para colher retorna o estágio
+  /// máximo. O seletor e o widget do terreno usam esse valor para trocar a
+  /// arte sem recriar o progresso.
+  int stage(DateTime now) {
+    if (isEmpty) return 0;
+    if (isReady(now)) return GameConstants.cropStageCount;
+    // O crescimento percorre só os estágios 1..3 (broto → quase pronta).
+    // O 4º fica reservado para a colheita: aos 23 de 30 s a alface ainda
+    // aparece em crescimento, e só fica "pronta" quando isReady for true.
+    final scaled = progress(now) * (GameConstants.cropStageCount - 1);
+    return scaled.ceil().clamp(1, GameConstants.cropStageCount - 1);
+  }
+
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'plantedCrop': plantedCrop?.name,
+        'plantedAt': plantedAt?.toIso8601String(),
+        'growDurationSeconds': growDuration?.inSeconds,
+        'growDurationMilliseconds': growDuration?.inMilliseconds,
+      };
+
+  factory Plot.fromMap(Map<String, dynamic> map) {
+    final id = map['id'] as String? ?? 'plot_0';
+    final plot = Plot(id: id);
+
+    final cropName = map['plantedCrop'] as String?;
+    if (cropName != null) {
+      plot.plantedCrop = CropType.values.firstWhere((c) => c.name == cropName);
+    }
+
+    final plantedAtStr = map['plantedAt'] as String?;
+    if (plantedAtStr != null) {
+      plot.plantedAt = DateTime.parse(plantedAtStr);
+      final milliseconds = map['growDurationMilliseconds'];
+      final seconds = map['growDurationSeconds'];
+
+      if (milliseconds is int) {
+        plot.growDuration = Duration(milliseconds: milliseconds);
+      } else if (seconds is int) {
+        plot.growDuration = Duration(seconds: seconds);
+      } else {
+        plot.growDuration = Crops.of(plot.plantedCrop!).growTime;
+      }
+    }
+
+    return plot;
+  }
+}
+
+// ------------------------------------------------------------
+// [models/upgrade.dart]  Tipos de upgrade permanente
+// ------------------------------------------------------------
+enum UpgradeType {
+  sellBoost,
+  seedDiscount,
+  growSpeed;
+
+  String get label => switch (this) {
+        UpgradeType.sellBoost => 'Venda Melhor',
+        UpgradeType.seedDiscount => 'Semente Barata',
+        UpgradeType.growSpeed => 'Crescimento Rápido',
+      };
+
+  String get emoji => switch (this) {
+        UpgradeType.sellBoost => '💰',
+        UpgradeType.seedDiscount => '🪙',
+        UpgradeType.growSpeed => '⏱️',
+      };
+
+  String get description => switch (this) {
+        UpgradeType.sellBoost => '+20% de venda por nível',
+        UpgradeType.seedDiscount => '−15% no custo da semente por nível',
+        UpgradeType.growSpeed => '−10% no tempo de crescimento por nível',
+      };
+}
+
+// ------------------------------------------------------------
+// [models/player.dart]  Estado central do jogador
+// ------------------------------------------------------------
+class Player {
+  Player({
+    required this.coins,
+    required this.plotCount,
+    required this.plots,
+    this.xp = 0,
+    this.sellBoostLevel = 0,
+    this.seedDiscountLevel = 0,
+    this.growSpeedLevel = 0,
+  });
+
+  factory Player.initial({int plotCount = GameConstants.startingPlots}) {
+    return Player(
+      coins: GameConstants.startingCoins,
+      plotCount: plotCount,
+      plots: List.generate(plotCount, (i) => Plot(id: 'plot_$i')),
+    );
+  }
+
+  /// Limiares de XP por nível, do 1 ao 8.
+  static const xpThresholds = [0, 100, 300, 600, 1000, 1500, 2100, 2800];
+
+  int coins;
+  int xp;
+  int plotCount;
+  List<Plot> plots;
+  int sellBoostLevel;
+  int seedDiscountLevel;
+  int growSpeedLevel;
+
+  int get level {
+    var lvl = 1;
+    for (var i = 0; i < xpThresholds.length; i++) {
+      if (xp >= xpThresholds[i]) lvl = i + 1;
+    }
+    return lvl;
+  }
+
+  bool isUnlocked(CropType type) => level >= Crops.of(type).unlockLevel;
+
+  /// Cultura acaba de ser desbloqueada no nível atual (badge "Novo!").
+  bool isNewlyUnlocked(CropType type) => level == Crops.of(type).unlockLevel;
+
+  // Efeitos acumulativos (multiplicativos) dos upgrades.
+  double get sellMultiplier => math.pow(1.20, sellBoostLevel).toDouble();
+  double get seedCostMultiplier => math.pow(0.85, seedDiscountLevel).toDouble();
+  double get growTimeMultiplier => math.pow(0.90, growSpeedLevel).toDouble();
+
+  int effectiveSeedCost(Crop crop) =>
+      (crop.seedCost * seedCostMultiplier).round();
+  int effectiveSellValue(Crop crop) =>
+      (crop.sellValue * sellMultiplier).round();
+  Duration effectiveGrowTime(Crop crop) => Duration(
+        milliseconds:
+            (crop.growTime.inMilliseconds * growTimeMultiplier).round(),
+      );
+
+  int get nextPlotCost {
+    final exponent = plotCount - GameConstants.startingPlots;
+    return (GameConstants.newPlotBaseCost *
+            math.pow(GameConstants.newPlotGrowthFactor, exponent))
+        .round();
+  }
+
+  bool get canBuyMorePlots => plotCount < GameConstants.maxPlots;
+
+  bool buyPlot() {
+    if (!canBuyMorePlots) return false;
+    final cost = nextPlotCost;
+    if (coins < cost) return false;
+    coins -= cost;
+    plotCount++;
+    plots.add(Plot(id: 'plot_${plotCount - 1}'));
+    return true;
+  }
+
+  int upgradeLevel(UpgradeType type) => switch (type) {
+        UpgradeType.sellBoost => sellBoostLevel,
+        UpgradeType.seedDiscount => seedDiscountLevel,
+        UpgradeType.growSpeed => growSpeedLevel,
+      };
+
+  int upgradeCost(UpgradeType type) {
+    final currentLevel = upgradeLevel(type);
+    final (base, factor) = switch (type) {
+      UpgradeType.sellBoost => (100.0, 1.8),
+      UpgradeType.seedDiscount => (80.0, 1.6),
+      UpgradeType.growSpeed => (120.0, 1.7),
+    };
+    return (base * math.pow(factor, currentLevel)).round();
+  }
+
+  bool buyUpgrade(UpgradeType type) {
+    if (upgradeLevel(type) >= GameConstants.maxUpgradeLevel) return false;
+    final cost = upgradeCost(type);
+    if (coins < cost) return false;
+    coins -= cost;
+    switch (type) {
+      case UpgradeType.sellBoost:
+        sellBoostLevel++;
+      case UpgradeType.seedDiscount:
+        seedDiscountLevel++;
+      case UpgradeType.growSpeed:
+        growSpeedLevel++;
+    }
+    return true;
+  }
+
+  bool plant(Plot plot, Crop crop, DateTime now) {
+    if (plot.isPlanted) return false;
+    if (!isUnlocked(crop.type)) return false;
+    final cost = effectiveSeedCost(crop);
+    if (coins < cost) return false;
+    coins -= cost;
+    plot.plantedCrop = crop.type;
+    plot.plantedAt = now;
+    plot.growDuration = effectiveGrowTime(crop);
+    return true;
+  }
+
+  int harvest(Plot plot, DateTime now) {
+    if (!plot.isPlanted || !plot.isReady(now)) return 0;
+    final crop = Crops.of(plot.plantedCrop!);
+    final reward = effectiveSellValue(crop);
+    coins += reward;
+    xp += reward;
+    plot.plantedCrop = null;
+    plot.plantedAt = null;
+    plot.growDuration = null;
+    return reward;
+  }
+
+  Map<String, dynamic> toMap() => {
+        'coins': coins,
+        'xp': xp,
+        'plotCount': plotCount,
+        'plots': plots.map((p) => p.toMap()).toList(),
+        'sellBoostLevel': sellBoostLevel,
+        'seedDiscountLevel': seedDiscountLevel,
+        'growSpeedLevel': growSpeedLevel,
+      };
+
+  factory Player.fromMap(Map<String, dynamic> map) {
+    final plotCount = map['plotCount'] as int? ?? GameConstants.startingPlots;
+    final player = Player.initial(plotCount: plotCount);
+    player.coins = map['coins'] as int? ?? GameConstants.startingCoins;
+    player.xp = map['xp'] as int? ?? 0;
+    player.sellBoostLevel = map['sellBoostLevel'] as int? ?? 0;
+    player.seedDiscountLevel = map['seedDiscountLevel'] as int? ?? 0;
+    player.growSpeedLevel = map['growSpeedLevel'] as int? ?? 0;
+
+    final rawPlots = map['plots'];
+    if (rawPlots is List) {
+      player.plots = rawPlots
+          .map((p) => Plot.fromMap(Map<String, dynamic>.from(p as Map)))
+          .toList();
+    }
+    if (player.plots.length != player.plotCount) {
+      player.plotCount = player.plots.length;
+    }
+    return player;
+  }
+}
+
+// ------------------------------------------------------------
+// [ui/widgets/plot_widget.dart]  Canteiro isométrico (losango)
+// ------------------------------------------------------------
+
+/// Losango 2:1 compartilhado pelos canteiros e pelo botão de expansão.
+Path isoDiamondPath(Size size) => Path()
+  ..moveTo(size.width / 2, 0)
+  ..lineTo(size.width, size.height / 2)
+  ..lineTo(size.width / 2, size.height)
+  ..lineTo(0, size.height / 2)
+  ..close();
+
+/// Recorta a pintura E o hit-test no formato de losango. Assim um toque na
+/// borda compartilhada por dois canteiros seleciona apenas um deles.
+class IsoDiamondClipper extends CustomClipper<Path> {
+  const IsoDiamondClipper();
+
+  @override
+  Path getClip(Size size) => isoDiamondPath(size);
+
+  @override
+  bool shouldReclip(IsoDiamondClipper oldClipper) => false;
+}
+
+/// Pinta a terra arada e o cultivo conforme o estágio de crescimento
+/// (0 = vazio; 1..3 = crescendo; [GameConstants.cropStageCount] = pronta).
+class PlotPainter extends CustomPainter {
+  PlotPainter({required this.stage, required this.ready});
+
+  final int stage;
+  final bool ready;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final path = isoDiamondPath(size);
+    final rect = Offset.zero & size;
+
+    canvas.save();
+    canvas.clipPath(path);
+
+    // Terra: mais clara vazia; mais escura quando cultivada.
+    final soil = Paint()
+      ..shader = LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: stage == 0
+            ? const [Color(0xFFBC8A55), Color(0xFF7A4E2F)]
+            : const [Color(0xFF9C7040), Color(0xFF5C4026)],
+      ).createShader(rect);
+    canvas.drawRect(rect, soil);
+
+    // Sulcos de plantio seguindo a diagonal maior do losango.
+    final furrow = Paint()
+      ..color = const Color(0xFF6B4A2C)
+      ..strokeWidth = math.max(1.5, size.width * 0.03)
+      ..strokeCap = StrokeCap.round;
+    final ridge = Paint()
+      ..color = const Color(0xFFCDA06A)
+      ..strokeWidth = math.max(1.0, size.width * 0.012)
+      ..strokeCap = StrokeCap.round;
+    for (var r = 1; r < 4; r++) {
+      final sx = size.width * (0.10 + r * 0.14);
+      final sy = size.height * (0.74 - r * 0.16);
+      final from = Offset(sx, sy);
+      final to = Offset(
+        sx + size.width * 0.38,
+        sy + size.height * 0.38,
+      );
+      canvas.drawLine(from, to, furrow);
+      canvas.drawLine(
+        from + const Offset(0, -2),
+        to + const Offset(0, -2),
+        ridge,
+      );
+    }
+
+    _paintCrop(canvas, size);
+    canvas.restore();
+
+    // Contorno: dourado quando pronto para colher.
+    canvas.drawPath(
+      path,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = ready ? size.width * 0.05 : size.width * 0.035
+        ..color = ready ? const Color(0xFFFFD54F) : const Color(0xFF4A3A26),
+    );
+  }
+
+  void _paintCrop(Canvas canvas, Size size) {
+    if (stage == 0) return;
+    final center = Offset(size.width / 2, size.height * 0.40);
+    final baseR = size.width * (0.06 + stage * 0.035);
+    final leafCount = 4 + stage * 2;
+    final leaf = Paint()..color = _stageColor(stage);
+
+    for (var i = 0; i < leafCount; i++) {
+      final angle = (i / leafCount) * 2 * math.pi;
+      final r = baseR * (i.isEven ? 1.05 : 0.78);
+      final leafCenter = center +
+          Offset(
+            math.cos(angle) * r * 0.55,
+            math.sin(angle) * r * 0.55,
+          );
+      canvas.drawCircle(leafCenter, r, leaf);
+    }
+    canvas.drawCircle(
+      center,
+      baseR * 0.62,
+      Paint()..color = const Color(0xFFA5D65A),
+    );
+
+    // Brilho indicando pronta para colher.
+    if (stage == GameConstants.cropStageCount) {
+      canvas.drawCircle(
+        center,
+        baseR * 1.2,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2
+          ..color = const Color(0xFFFFF9C4),
+      );
+    }
+  }
+
+  Color _stageColor(int stage) => switch (stage) {
+        1 => const Color(0xFF9CCC65),
+        2 => const Color(0xFF74A93A),
+        3 => const Color(0xFF52912E),
+        _ => const Color(0xFF3E8E41),
+      };
+
+  @override
+  bool shouldRepaint(PlotPainter oldDelegate) =>
+      stage != oldDelegate.stage || ready != oldDelegate.ready;
+}
+
+/// Canteiro individual renderizado como losango isométrico.
+class PlotWidget extends StatelessWidget {
+  const PlotWidget({super.key, required this.plot, required this.onTap});
+
+  final Plot plot;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final stage = plot.stage(now);
+    final ready = stage == GameConstants.cropStageCount;
+
+    final label = plot.isEmpty
+        ? 'Canteiro vazio'
+        : ready
+            ? '${plot.plantedCrop?.label ?? 'Cultura'} pronta para colher'
+            : '${plot.plantedCrop?.label ?? 'Cultura'} crescendo';
+
+    return Semantics(
+      button: true,
+      label: label,
+      child: ClipPath(
+        clipper: const IsoDiamondClipper(),
+        clipBehavior: Clip.hardEdge,
+        child: GestureDetector(
+          onTap: onTap,
+          child: CustomPaint(
+            painter: PlotPainter(stage: stage, ready: ready),
+            child: const SizedBox.expand(),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ------------------------------------------------------------
+// [ui/widgets/new_plot_tile.dart]  Losango do canteiro expansível
+// ------------------------------------------------------------
+
+/// Losango tracejado que representa o próximo canteiro comprável.
+class NewPlotTile extends StatelessWidget {
+  const NewPlotTile({
+    super.key,
+    required this.cost,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  final int cost;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: 'Novo canteiro · $cost moedas',
+      child: ClipPath(
+        clipper: const IsoDiamondClipper(),
+        clipBehavior: Clip.hardEdge,
+        child: GestureDetector(
+          onTap: enabled ? onTap : null,
+          child: CustomPaint(
+            painter: NewPlotPainter(enabled: enabled),
+            child: FractionallySizedBox(
+              widthFactor: .72,
+              heightFactor: .65,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Novo canteiro',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                        color: enabled
+                            ? const Color(0xFF2E4E1E)
+                            : const Color(0xFF6E6E6E),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '🪙 $cost',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                        color: enabled
+                            ? const Color(0xFF2E4E1E)
+                            : const Color(0xFF6E6E6E),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class NewPlotPainter extends CustomPainter {
+  NewPlotPainter({required this.enabled});
+
+  final bool enabled;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final path = isoDiamondPath(size);
+    final rect = Offset.zero & size;
+
+    canvas.save();
+    canvas.clipPath(path);
+
+    canvas.drawRect(
+      rect,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: enabled
+              ? const [Color(0xFFB9D67E), Color(0xFF7EA652)]
+              : const [Color(0xFF9C9C9C), Color(0xFF6E6E6E)],
+        ).createShader(rect),
+    );
+
+    // Bordadura interna tracejada sugerindo o contorno do futuro canteiro.
+    final inner = Path()
+      ..moveTo(size.width / 2, size.height * 0.16)
+      ..lineTo(size.width * 0.84, size.height / 2)
+      ..lineTo(size.width / 2, size.height * 0.84)
+      ..lineTo(size.width * 0.16, size.height / 2)
+      ..close();
+    canvas.drawPath(
+      inner,
+      Paint()
+        ..color = enabled ? const Color(0xFF4E7A2A) : const Color(0xFF5A5A5A)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = math.max(1.5, size.width * 0.03),
+    );
+    canvas.restore();
+
+    canvas.drawPath(
+      path,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = math.max(1.5, size.width * 0.035)
+        ..color = enabled ? const Color(0xFF3E5C2A) : const Color(0xFF555555),
+    );
+  }
+
+  @override
+  bool shouldRepaint(NewPlotPainter oldDelegate) =>
+      enabled != oldDelegate.enabled;
+}
+
+// ------------------------------------------------------------
+// [ui/widgets/crop_selector_sheet.dart]  Seletor de culturas
+// ------------------------------------------------------------
+class CropSelectorSheet extends StatelessWidget {
+  const CropSelectorSheet({
+    super.key,
+    required this.player,
+    required this.plot,
+    required this.onPlanted,
+  });
 
   final Player player;
+  final Plot plot;
+  final VoidCallback onPlanted;
+
+  String _formatDuration(Duration d) {
+    if (d.inHours > 0) {
+      final minutes = d.inMinutes % 60;
+      return '${d.inHours}h${minutes.toString().padLeft(2, '0')}min';
+    }
+    if (d.inMinutes > 0) {
+      final seconds = d.inSeconds % 60;
+      return '${d.inMinutes}min${seconds.toString().padLeft(2, '0')}s';
+    }
+    return '${d.inSeconds}s';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              '🌱 Escolha a cultura',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: CropType.values.length,
+                itemBuilder: (context, index) {
+                  final type = CropType.values[index];
+                  final crop = Crops.of(type);
+                  final unlocked = player.isUnlocked(type);
+                  final cost = player.effectiveSeedCost(crop);
+                  final sell = player.effectiveSellValue(crop);
+                  final canAfford = player.coins >= cost;
+                  final isNew = player.isNewlyUnlocked(type);
+
+                  return ListTile(
+                    enabled: unlocked,
+                    leading:
+                        Text(crop.emoji, style: const TextStyle(fontSize: 28)),
+                    title: Row(
+                      children: [
+                        Text(crop.label),
+                        if (isNew) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.orange,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Text(
+                              'Novo!',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          unlocked
+                              ? (canAfford
+                                  ? 'Semente 🪙 $cost · Vende 🪙 $sell'
+                                  : 'Semente 🪙 $cost · Faltam 🪙 ${cost - player.coins}')
+                              : 'Requer nível ${crop.unlockLevel}',
+                        ),
+                        if (unlocked) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            '⏱️ ${_formatDuration(player.effectiveGrowTime(crop))}',
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                        ],
+                      ],
+                    ),
+                    isThreeLine: unlocked,
+                    trailing: unlocked
+                        ? const Icon(Icons.chevron_right, color: Colors.green)
+                        : const Icon(Icons.lock_outline, color: Colors.grey),
+                    onTap: unlocked && canAfford
+                        ? () {
+                            final ok = player.plant(plot, crop, DateTime.now());
+                            if (ok) {
+                              onPlanted();
+                              Navigator.pop(context);
+                            }
+                          }
+                        : null,
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ------------------------------------------------------------
+// [ui/widgets/upgrade_sheet.dart]  Modal de upgrades
+// ------------------------------------------------------------
+class UpgradeSheet extends StatelessWidget {
+  const UpgradeSheet({
+    super.key,
+    required this.player,
+    required this.onPurchased,
+  });
+
+  final Player player;
+  final VoidCallback onPurchased;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              '🛠️ Upgrades da fazenda',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  for (final type in UpgradeType.values)
+                    _UpgradeTile(
+                      player: player,
+                      type: type,
+                      onPurchased: onPurchased,
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _UpgradeTile extends StatelessWidget {
+  const _UpgradeTile({
+    required this.player,
+    required this.type,
+    required this.onPurchased,
+  });
+
+  final Player player;
+  final UpgradeType type;
+  final VoidCallback onPurchased;
+
+  @override
+  Widget build(BuildContext context) {
+    final currentLevel = player.upgradeLevel(type);
+    final maxed = currentLevel >= GameConstants.maxUpgradeLevel;
+    final cost = player.upgradeCost(type);
+    final canAfford = player.coins >= cost;
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: ListTile(
+        leading: Text(type.emoji, style: const TextStyle(fontSize: 28)),
+        title: Text(type.label,
+            style: const TextStyle(fontWeight: FontWeight.bold)),
+        subtitle: Text(
+          '${type.description}\nNível $currentLevel/${GameConstants.maxUpgradeLevel}',
+        ),
+        isThreeLine: true,
+        trailing: maxed
+            ? const Text(
+                'Máx',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.green,
+                ),
+              )
+            : FilledButton(
+                onPressed: canAfford
+                    ? () {
+                        final ok = player.buyUpgrade(type);
+                        if (ok) onPurchased();
+                      }
+                    : null,
+                child: Text('🪙 $cost'),
+              ),
+      ),
+    );
+  }
+}
+
+// ------------------------------------------------------------
+// [ui/screens/home_screen.dart]  Tela principal da fazenda
+// ------------------------------------------------------------
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({
+    super.key,
+    required this.player,
+    this.onShouldSave,
+  });
+
+  final Player player;
+  final VoidCallback? onShouldSave;
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+  /// Banner de teste do Google AdMob (Android).
+  static const _bannerAdUnitId = 'ca-app-pub-3940256099942544/6300978111';
+
+  Timer? _tick;
+  BannerAd? _bannerAd;
+  bool _bannerLoaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    // Atualiza as barras de progresso em tempo real.
+    _tick = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+    if (_useTestAds) _loadBanner();
+  }
+
+  void _loadBanner() {
+    // O banner adaptativo ancorado precisa da largura real da tela, que só
+    // existe após o primeiro layout. Leia no pós-frame e carregue o anúncio
+    // em largura cheia no rodapé (canto inferior em paisagem).
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted || !_useTestAds) return;
+      final media = MediaQuery.of(context);
+      final width = (media.size.width - media.viewPadding.horizontal).floor();
+      final AnchoredAdaptiveBannerAdSize? adSize;
+      try {
+        adSize = await AdSize.getCurrentOrientationAnchoredAdaptiveBannerAdSize(
+            width);
+      } catch (error) {
+        debugPrint('Falha ao calcular o tamanho do anúncio de teste: $error');
+        return;
+      }
+      if (adSize == null || !mounted) return;
+
+      final banner = BannerAd(
+        adUnitId: _bannerAdUnitId,
+        size: adSize,
+        request: const AdRequest(),
+        listener: BannerAdListener(
+          onAdLoaded: (ad) {
+            // Marca o banner como carregado e libera o espaço do rodapé.
+            if (!mounted) return;
+            setState(() => _bannerLoaded = true);
+          },
+          onAdFailedToLoad: (ad, _) {
+            // Descarta o anúncio e limpa o estado, liberando o rodapé.
+            ad.dispose();
+            if (mounted) {
+              setState(() {
+                _bannerAd = null;
+                _bannerLoaded = false;
+              });
+            }
+          },
+        ),
+      );
+      // Guarda a referência antes de carregar: o dispose da tela cobre também
+      // o carregamento pendente.
+      _bannerAd = banner;
+      banner.load();
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // Ao retomar, re-renderiza com DateTime.now(): o tempo offline é
+      // contabilizado e as plantações não ficam congeladas.
+      if (mounted) setState(() {});
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _tick?.cancel();
+    _bannerAd?.dispose();
+    super.dispose();
+  }
+
+  void _handlePlotTap(Plot plot) {
+    if (plot.isEmpty) {
+      _showCropSelector(plot);
+    } else if (plot.isReady(DateTime.now())) {
+      final reward = widget.player.harvest(plot, DateTime.now());
+      if (reward > 0) {
+        widget.onShouldSave?.call();
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(content: Text('Colheita vendida por 🪙 $reward!')),
+          );
+      }
+      setState(() {});
+    }
+  }
+
+  void _showCropSelector(Plot plot) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (context) => CropSelectorSheet(
+        player: widget.player,
+        plot: plot,
+        onPlanted: () {
+          widget.onShouldSave?.call();
+          setState(() {});
+        },
+      ),
+    );
+  }
+
+  void _showUpgrades() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setSheetState) => UpgradeSheet(
+          player: widget.player,
+          onPurchased: () {
+            widget.onShouldSave?.call();
+            setState(() {});
+            setSheetState(() {});
+          },
+        ),
+      ),
+    );
+  }
+
+  void _buyNewPlot() {
+    final ok = widget.player.buyPlot();
+    if (ok) {
+      widget.onShouldSave?.call();
+    } else {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+              content: Text('Moedas insuficientes para novo canteiro!')),
+        );
+    }
+    setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final player = widget.player;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Little Farm'),
+        centerTitle: true,
+        leading: IconButton(
+          icon: const Icon(Icons.trending_up),
+          tooltip: 'Upgrades',
+          onPressed: _showUpgrades,
+        ),
+        actions: [
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.only(right: 16),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.green.shade100,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      'Nível ${player.level}',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  const Text('🪙', style: TextStyle(fontSize: 18)),
+                  const SizedBox(width: 4),
+                  Text(
+                    '${player.coins}',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 18,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+      body: _FarmScene(
+        player: player,
+        onPlotTap: _handlePlotTap,
+        onBuyPlot: _buyNewPlot,
+      ),
+      bottomNavigationBar: _bannerLoaded && _bannerAd != null
+          ? SafeArea(
+              top: false,
+              child: SizedBox(
+                height: _bannerAd!.size.height.toDouble(),
+                child: Center(
+                  child: SizedBox(
+                    width: _bannerAd!.size.width.toDouble(),
+                    height: _bannerAd!.size.height.toDouble(),
+                    child: AdWidget(ad: _bannerAd!),
+                  ),
+                ),
+              ),
+            )
+          : null,
+    );
+  }
+}
+
+// ------------------------------------------------------------
+// [ui/widgets/farm_scene.dart]  Cena isométrica 2.5D da fazenda
+// ------------------------------------------------------------
+
+/// Compõe os canteiros em um terreno contínuo, usando a projeção isométrica
+/// de [GameConstants.plotCenterForIndex]. A cena escala à largura da tela e
+/// o toque é identificado pelo mesmo mapeamento, sem ambiguidade na borda
+/// compartilhada (garantida pelo recorte de hit-test de cada canteiro).
+class _FarmScene extends StatelessWidget {
+  const _FarmScene({
+    required this.player,
+    required this.onPlotTap,
+    required this.onBuyPlot,
+  });
+
+  final Player player;
+  final void Function(Plot plot) onPlotTap;
+  final VoidCallback onBuyPlot;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final w = constraints.maxWidth;
+        final h = constraints.maxHeight;
+        final tileCount =
+            player.plots.length + (player.canBuyMorePlots ? 1 : 0);
+
+        // Caixa envolvente dos losangos, no espaço isométrico.
+        var minX = 0.0, maxX = 0.0, minY = 0.0, maxY = 0.0;
+        for (var i = 0; i < tileCount; i++) {
+          final c = GameConstants.plotCenterForIndex(i);
+          minX = math.min(minX, c.dx);
+          maxX = math.max(maxX, c.dx);
+          minY = math.min(minY, c.dy);
+          maxY = math.max(maxY, c.dy);
+        }
+        minX -= GameConstants.isoTileHalfWidth;
+        maxX += GameConstants.isoTileHalfWidth;
+        minY -= GameConstants.isoTileHalfHeight;
+        maxY += GameConstants.isoTileHalfHeight;
+
+        final contentW = math.max(1.0, maxX - minX);
+        final contentH = math.max(1.0, maxY - minY);
+
+        // Escala para caber com folga, preservando o aspecto 2:1 do losango.
+        final mapWidth = math.min(w, h * 16 / 9);
+        final mapHeight = mapWidth * 9 / 16;
+        final scale =
+            math.min(mapWidth * .46 / contentW, mapHeight * .52 / contentH);
+        final isoCenter = Offset((minX + maxX) / 2, (minY + maxY) / 2);
+        final screenCenter =
+            Offset(w / 2 - mapWidth * .10, h / 2 + mapHeight * .17);
+
+        final tileW = GameConstants.isoTileHalfWidth * 2 * scale;
+        final tileH = GameConstants.isoTileHalfHeight * 2 * scale;
+
+        double leftFor(int i) {
+          final c = GameConstants.plotCenterForIndex(i);
+          return screenCenter.dx + (c.dx - isoCenter.dx) * scale - tileW / 2;
+        }
+
+        double topFor(int i) {
+          final c = GameConstants.plotCenterForIndex(i);
+          return screenCenter.dy + (c.dy - isoCenter.dy) * scale - tileH / 2;
+        }
+
+        return ColoredBox(
+          color: const Color(0xFF253F29),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              Center(
+                child: SizedBox(
+                  width: mapWidth,
+                  height: mapHeight,
+                  child: ExcludeSemantics(
+                    child: Image.asset('assets/images/farm.webp',
+                        fit: BoxFit.fill),
+                  ),
+                ),
+              ),
+              // Índice crescente = mais perto do observador; desenhado por
+              // último para dar a sobreposição frontal correta.
+              for (var i = 0; i < player.plots.length; i++)
+                Positioned(
+                  left: leftFor(i),
+                  top: topFor(i),
+                  width: tileW,
+                  height: tileH,
+                  child: PlotWidget(
+                    plot: player.plots[i],
+                    onTap: () => onPlotTap(player.plots[i]),
+                  ),
+                ),
+              if (player.canBuyMorePlots && tileCount > 0)
+                Positioned(
+                  left: leftFor(player.plots.length),
+                  top: topFor(player.plots.length),
+                  width: tileW,
+                  height: tileH,
+                  child: NewPlotTile(
+                    cost: player.nextPlotCost,
+                    enabled: player.coins >= player.nextPlotCost,
+                    onTap: onBuyPlot,
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ------------------------------------------------------------
+// [main.dart]  Inicialização do app
+// ------------------------------------------------------------
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  // Trava o app em paisagem (melhor aproveitamento da cena isométrica 2.5D).
+  if (!kIsWeb) {
+    await SystemChrome.setPreferredOrientations([
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+  }
+  // AdMob de teste — o App ID real entra no AndroidManifest.xml.
+  // Inicializa somente no Android (não na web), usando os IDs de teste.
+  if (_useTestAds) {
+    try {
+      await MobileAds.instance.initialize();
+    } catch (error) {
+      debugPrint('Falha ao inicializar anúncios de teste: $error');
+    }
+  }
+  await Hive.initFlutter();
+  final box = await Hive.openBox(GameConstants.hiveBoxName);
+
+  final player = await _loadOrCreate(box);
+  runApp(FazendinhaApp(player: player, box: box));
+}
+
+Future<Player> _loadOrCreate(Box box) async {
+  final saved = box.get(GameConstants.playerKey);
+  if (saved is Map) {
+    return Player.fromMap(Map<String, dynamic>.from(saved));
+  }
+  final fresh = Player.initial(plotCount: GameConstants.startingPlots);
+  await box.put(GameConstants.playerKey, fresh.toMap());
+  await box.flush();
+  return fresh;
+}
+
+class FazendinhaApp extends StatefulWidget {
+  const FazendinhaApp({super.key, required this.player, this.box});
+
+  final Player player;
+  final Box? box;
+
+  @override
+  State<FazendinhaApp> createState() => _FazendinhaAppState();
+}
+
+class _FazendinhaAppState extends State<FazendinhaApp>
+    with WidgetsBindingObserver {
+  Timer? _saveTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _saveTimer = Timer.periodic(
+      const Duration(seconds: GameConstants.autoSaveSeconds),
+      (_) => _save(),
+    );
+  }
+
+  Future<void> _save() async {
+    final box = widget.box;
+    if (box == null) return;
+    try {
+      // Aguarda a gravação antes do flush para não perder o progresso se o
+      // app for encerrado logo após plantar/colher/comprar.
+      await box.put(GameConstants.playerKey, widget.player.toMap());
+      await box.flush();
+    } catch (e) {
+      // Falha de escrita não deve derrubar o app em segundo plano.
+      debugPrint('Falha ao salvar o progresso: $e');
+    }
+  }
+
+  @override
+  void dispose() {
+    _saveTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final isBackground = state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.detached;
+    if (isBackground) {
+      _save();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Fazendinha Idle',
+      title: 'Little Farm',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         fontFamily: 'FarmRoboto',
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF4CAF50)),
         useMaterial3: true,
       ),
-      home: HomeScreen(player: player),
+      home: HomeScreen(
+        player: widget.player,
+        onShouldSave: _save,
+      ),
     );
   }
 }

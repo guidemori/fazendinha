@@ -1,9 +1,11 @@
-# Fazendinha Idle
+# Little Farm
 
-Jogo Flutter para Android e iOS. Toque em um canteiro para ver seu estado.
-Use a barra inferior para percorrer os canteiros ou voltar à visão geral.
-O aplicativo nativo abre em paisagem e permite virar o celular 180°.
-A prévia no navegador também se adapta a janelas em retrato.
+Jogo Flutter para Android e iOS. Toque em um canteiro vazio para escolher
+uma semente ou em um cultivo maduro para colher. Use o botão de melhorias
+para comprar upgrades e o losango de expansão para comprar novos canteiros.
+
+O jogo abre em paisagem. O progresso é salvo no Hive e o crescimento usa o
+tempo decorrido desde o plantio, incluindo o tempo com o aplicativo fechado.
 
 Com o Flutter e um celular ou emulador configurado, execute:
 
@@ -12,4 +14,6 @@ flutter pub get
 flutter run
 ```
 
-Para conferir a interface no navegador, use `flutter run -d chrome`.
+O Android usa o banner de teste do AdMob. Para rodar sem anúncios de teste,
+use `flutter run --dart-define=ENABLE_TEST_ADS=false`. Para a prévia no
+navegador, use `flutter run -d chrome`.
