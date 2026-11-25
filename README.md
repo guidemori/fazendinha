@@ -1,8 +1,10 @@
 # Little Farm
 
-Jogo Flutter para Android e iOS. Toque em um canteiro vazio para escolher
-uma semente ou em um cultivo maduro para colher. Use o botão de melhorias
-para comprar upgrades e o losango de expansão para comprar novos canteiros.
+Jogo Flutter para Android e iOS. Escolha a semente na barra inferior e
+toque nos canteiros preparados para plantar. Use **Colher** nos cultivos
+maduros para ganhar XP e colocar a produção no cesto. Use **Vender** para
+converter o cesto em moedas e **Preparar** para arar a terra após a colheita.
+O painel de nível mostra o progresso até o próximo nível.
 
 O jogo abre em paisagem. O progresso é salvo no Hive e o crescimento usa o
 tempo decorrido desde o plantio, incluindo o tempo com o aplicativo fechado.

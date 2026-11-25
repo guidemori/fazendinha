@@ -3,21 +3,49 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('abre a seleção de cultura por toque em paisagem',
+  testWidgets('planta direto e completa o ciclo de colher, vender e preparar',
       (tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(844, 390);
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    await tester.pumpWidget(FazendinhaApp(player: Player.initial()));
+    final player = Player.initial();
+    await tester.pumpWidget(FazendinhaApp(player: player));
     await tester.pumpAndSettle();
 
     final plots = find.byType(PlotWidget);
     expect(plots, findsNWidgets(4));
-    await tester.tap(plots.first);
+    await tester.tap(find.text('Alface'));
     await tester.pumpAndSettle();
     expect(find.byType(CropSelectorSheet), findsOneWidget);
+    await tester.tap(find.text('Alface').last);
+    await tester.pumpAndSettle();
+    await tester.tap(plots.first);
+    await tester.pump();
+    await tester.tap(plots.at(1));
+    await tester.pump();
+    expect(find.byType(CropSelectorSheet), findsNothing);
+    expect(player.coins, 5);
+    final first = player.plots.first;
+    first.plantedAt = DateTime.now().subtract(const Duration(minutes: 1));
+    await tester.tap(find.text('Colher'));
+    await tester.tap(plots.first);
+    await tester.pump();
+    expect(player.basketCount, 1);
+    expect(player.coins, 5);
+    expect(find.text('12/100 XP'), findsOneWidget);
+    expect(first.tilled, isFalse);
+
+    await tester.tap(find.text('Vender 1'));
+    await tester.pump();
+    expect(player.basketCount, 0);
+    expect(player.coins, 17);
+
+    await tester.tap(find.text('Preparar'));
+    await tester.tap(plots.first);
+    await tester.pump();
+    expect(first.tilled, isTrue);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
@@ -46,22 +74,21 @@ void main() {
         find.text('Moedas insuficientes! Faltam 🪙 100 para o novo canteiro.'),
         findsOneWidget);
 
-    await tester.tap(find.byType(PlotWidget).first);
+    await tester.tap(find.text('Alface'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Cenoura'));
     await tester.pumpAndSettle();
     expect(find.text('Requer nível 2 para plantar Cenoura.').hitTestable(),
         findsOneWidget);
 
-    await tester.tap(find.text('Alface'));
-    await tester.pumpAndSettle();
-    expect(find.text('Moedas insuficientes! Faltam 🪙 5.').hitTestable(),
-        findsOneWidget);
-    expect(player.plots.first.isEmpty, isTrue);
-
     Navigator.of(tester.element(find.byType(CropSelectorSheet))).pop();
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Upgrades'));
+    await tester.tap(find.byType(PlotWidget).first);
+    await tester.pumpAndSettle();
+    expect(find.text('Moedas insuficientes! Faltam 5.'), findsOneWidget);
+    expect(player.plots.first.isEmpty, isTrue);
+
+    await tester.tap(find.byTooltip('Melhorias'));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, '🪙 100'));
     await tester.pumpAndSettle();
@@ -101,6 +128,17 @@ void main() {
     final ready = start.add(crop.growTime);
     expect(restored.harvest(restored.plots.first, ready),
         restored.effectiveSellValue(crop));
-    expect(restored.plots.first.isEmpty, isTrue);
+    final plot = restored.plots.first;
+    expect(plot.isEmpty, isTrue);
+    expect(plot.tilled, isFalse);
+    expect(restored.plant(plot, crop, ready), isFalse);
+    expect(restored.basketCount, 1);
+    expect(restored.levelProgress, closeTo(.14, .01));
+    final reloaded = Player.fromMap(restored.toMap());
+    expect(reloaded.plots.first.tilled, isFalse);
+    final coins = reloaded.coins;
+    expect(reloaded.sellBasket(), reloaded.effectiveSellValue(crop));
+    expect(reloaded.coins, coins + reloaded.effectiveSellValue(crop));
+    expect(reloaded.basketCount, 0);
   });
 }
