@@ -6,6 +6,10 @@ selecione uma no estoque **Sementes** e toque no canteiro úmido. O indicador
 do canteiro mostra a ação em andamento, saúde e crescimento. Cultivos maduros
 podem ser recolhidos por 48 horas. A enxada limpa cultivos que passaram desse prazo.
 
+Compre **Fertilizante** na Loja e use a ferramenta **Adubo** em um cultivo
+em crescimento. Cada aplicação consome uma unidade e reduz em 25% o tempo
+que ainda falta para amadurecer.
+
 Use **Colher** para ganhar XP e enviar a produção ao **Armazém**, onde você
 pode vender por espécie ou vender tudo. **Visitas de 7 dias** registra uma data
 local por dia de acesso e libera recompensas crescentes em moedas e sementes.

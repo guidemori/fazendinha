@@ -111,6 +111,35 @@ void main() {
     expect(wetPlot.isWet(expiry), isFalse);
   });
 
+  test('fertilizante reduz o tempo restante e persiste o consumo', () {
+    final start = DateTime.utc(2026, 1, 1);
+    final player = Player.initial();
+    final plot = player.plots.first;
+    final crop = Crops.of(CropType.alface);
+    expect(player.buyFertilizer(), isTrue);
+    expect(player.buySeed(crop.type), isTrue);
+    expect(player.coins, 2);
+    expect(player.fertilize(plot, start), isFalse);
+    expect(plot.water(start), isTrue);
+    final planting = start.add(Plot.wateringDuration);
+    expect(player.plant(plot, crop, planting), isTrue);
+    expect(player.fertilize(plot, planting), isFalse);
+
+    final now = plot.plantedAt!.add(const Duration(seconds: 10));
+    expect(player.fertilize(plot, now), isTrue);
+    final restored = Player.fromMap(player.toMap());
+    final restoredPlot = restored.plots.first;
+    expect(restored.fertilizer, 0);
+    expect(restoredPlot.growDuration, const Duration(seconds: 25));
+    final ready = restoredPlot.plantedAt!.add(const Duration(seconds: 25));
+    expect(restoredPlot.isReady(ready), isTrue);
+    expect(restored.buyFertilizer(), isFalse);
+
+    restored.fertilizer = 1;
+    expect(restored.fertilize(restoredPlot, ready), isFalse);
+    expect(restored.fertilizer, 1);
+  });
+
   test('recompensas crescem e cada data e resgate contam uma vez', () {
     final first = DateTime(2026, 1, 1, 10);
     final player = Player.initial();

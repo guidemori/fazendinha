@@ -395,6 +395,8 @@ class Player {
   int growSpeedLevel;
   final Map<CropType, int> basket = {};
   final Map<CropType, int> seeds = {};
+  static const fertilizerCost = 8;
+  int fertilizer = 0;
   static const visitDayLimit = 7;
   int visitDays = 0;
   int claimedVisitDays = 0;
@@ -434,6 +436,33 @@ class Player {
     if (coins < cost) return false;
     coins -= cost;
     seeds.update(type, (amount) => amount + 1, ifAbsent: () => 1);
+    return true;
+  }
+
+  bool buyFertilizer() {
+    if (coins < fertilizerCost) return false;
+    coins -= fertilizerCost;
+    fertilizer++;
+    return true;
+  }
+
+  bool fertilize(Plot plot, DateTime now) {
+    final plantedAt = plot.plantedAt;
+    final duration = plot.growDuration;
+    if (fertilizer <= 0 ||
+        !plot.isPlanted ||
+        plantedAt == null ||
+        duration == null ||
+        now.isBefore(plantedAt)) {
+      return false;
+    }
+
+    final remaining = plantedAt.add(duration).difference(now);
+    final reduction = remaining.inMilliseconds ~/ 4;
+    if (reduction <= 0) return false;
+
+    plot.growDuration = duration - Duration(milliseconds: reduction);
+    fertilizer--;
     return true;
   }
 
@@ -573,6 +602,7 @@ class Player {
   }
 
   Map<String, dynamic> toMap() => {
+        'fertilizer': fertilizer,
         'basket': basket.map((type, amount) => MapEntry(type.name, amount)),
         'seeds': seeds.map((type, amount) => MapEntry(type.name, amount)),
         'visitDays': visitDays,
@@ -596,6 +626,8 @@ class Player {
     player.seedDiscountLevel = map['seedDiscountLevel'] as int? ?? 0;
     player.growSpeedLevel = map['growSpeedLevel'] as int? ?? 0;
 
+    final fertilizer = map['fertilizer'];
+    if (fertilizer is int && fertilizer > 0) player.fertilizer = fertilizer;
     player.visitDays = (map['visitDays'] as int? ?? 0).clamp(0, visitDayLimit);
     player.claimedVisitDays =
         (map['claimedVisitDays'] as int? ?? 0).clamp(0, player.visitDays);
@@ -960,10 +992,12 @@ class CropSelectorSheet extends StatelessWidget {
     super.key,
     required this.player,
     required this.onSelected,
+    required this.onBuyFertilizer,
   });
 
   final Player player;
   final ValueChanged<CropType> onSelected;
+  final VoidCallback onBuyFertilizer;
 
   String _formatDuration(Duration d) {
     if (d.inHours > 0) {
@@ -990,6 +1024,19 @@ class CropSelectorSheet extends StatelessWidget {
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 12),
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.science_outlined),
+              title: const Text('Fertilizante'),
+              subtitle: Text(
+                  '−25% do tempo restante · estoque: ${player.fertilizer}'),
+              trailing: TextButton(
+                onPressed: player.coins >= Player.fertilizerCost
+                    ? onBuyFertilizer
+                    : null,
+                child: const Text('Comprar por ${Player.fertilizerCost}'),
+              ),
+            ),
             Flexible(
               child: ListView.builder(
                 shrinkWrap: true,
@@ -1228,7 +1275,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-enum _FarmTool { inspect, hoe, seed, water, harvest }
+enum _FarmTool { inspect, hoe, seed, water, fertilizer, harvest }
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   _FarmTool _tool = _FarmTool.inspect;
@@ -1373,6 +1420,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _FarmTool.inspect => false,
       _FarmTool.hoe => plot.hoe(now),
       _FarmTool.water => plot.water(now),
+      _FarmTool.fertilizer => player.fertilize(plot, now),
       _FarmTool.seed => player.plant(plot, Crops.of(_seed), now),
       _FarmTool.harvest => player.harvest(plot, now) > 0,
     };
@@ -1382,6 +1430,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         plot.isWet(now) &&
         (player.seeds[_seed] ?? 0) == 0) {
       hint = 'Sem sementes de ${_seed.label} · abra a Loja';
+    }
+    if (!changed && _tool == _FarmTool.fertilizer) {
+      hint = player.fertilizer == 0
+          ? 'Sem fertilizante · abra a Loja'
+          : 'Aplique em uma cultura em crescimento';
     }
     if (changed) widget.onShouldSave?.call();
     setState(() {
@@ -1543,11 +1596,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _showShop() {
     _showFarmSheet(
-      builder: (context) => CropSelectorSheet(
-        player: widget.player,
-        onSelected: (seed) {
-          if (widget.player.buySeed(seed)) _farmChanged();
-        },
+      builder: (context) => StatefulBuilder(
+        builder: (context, update) => CropSelectorSheet(
+          player: widget.player,
+          onSelected: (seed) {
+            if (widget.player.buySeed(seed)) _farmChanged();
+          },
+          onBuyFertilizer: () {
+            if (widget.player.buyFertilizer()) {
+              _farmChanged();
+              update(() {});
+            }
+          },
+        ),
       ),
     );
   }
@@ -1584,6 +1645,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final active = _tool == tool;
     return TextButton.icon(
       style: TextButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 7),
         foregroundColor:
             active ? const Color(0xff29351f) : const Color(0xfffff5d8),
         backgroundColor: active ? const Color(0xfff9cf72) : null,
@@ -1658,6 +1720,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                               'Inspecionar'),
                           _toolButton(_FarmTool.hoe, Icons.handyman, 'Enxada'),
                           TextButton.icon(
+                            style: TextButton.styleFrom(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 7),
+                            ),
                             onPressed: _showSeeds,
                             icon: const Icon(Icons.eco, size: 17),
                             label: Text(_tool == _FarmTool.seed
@@ -1666,6 +1732,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           ),
                           _toolButton(
                               _FarmTool.water, Icons.water_drop, 'Regar'),
+                          _toolButton(
+                              _FarmTool.fertilizer,
+                              Icons.science_outlined,
+                              'Adubo ${player.fertilizer}'),
                           _toolButton(
                               _FarmTool.harvest, Icons.agriculture, 'Colher'),
                         ],
