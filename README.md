@@ -3,8 +3,9 @@
 Jogo Flutter para Android e iOS. Prepare a terra com a **Enxada** quando
 necessário e use **Regar** para umedecê-la. Compre sementes na **Loja**,
 selecione uma no estoque **Sementes** e toque no canteiro úmido. O indicador
-do canteiro mostra a ação em andamento, saúde e crescimento. Cultivos maduros
-podem ser recolhidos por 48 horas. A enxada limpa cultivos que passaram desse prazo.
+do canteiro mostra a ação em andamento, saúde e crescimento. A saúde só cai após a
+maturação. A janela de colheita é 48 vezes o tempo base de crescimento de cada
+cultura, limitada a 48 horas. A enxada limpa cultivos que passaram desse prazo.
 
 Compre **Fertilizante** na Loja e use a ferramenta **Adubo** em um cultivo
 em crescimento. Cada aplicação consome uma unidade e reduz em 25% o tempo

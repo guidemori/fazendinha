@@ -135,6 +135,14 @@ class Crop {
   final Duration growTime;
   final int unlockLevel;
 
+  static const maxHarvestWindow = Duration(hours: 48);
+  static const harvestWindowMultiplier = 48;
+
+  Duration get harvestWindow {
+    final proportional = growTime * harvestWindowMultiplier;
+    return proportional > maxHarvestWindow ? maxHarvestWindow : proportional;
+  }
+
   String get emoji => type.emoji;
   String get label => type.label;
 }
@@ -216,18 +224,20 @@ class Plot {
 
   static const wateringDuration = Duration(seconds: 3);
   static const plantingDuration = Duration(seconds: 2);
-  static const harvestWindow = Duration(hours: 48);
 
   bool isWatering(DateTime now) => wateredAt?.isAfter(now) ?? false;
   bool isWet(DateTime now) => wateredAt != null && !isWatering(now);
   bool isPlanting(DateTime now) => plantedAt?.isAfter(now) ?? false;
 
   double health(DateTime now) {
+    final type = plantedCrop;
     final at = plantedAt;
     final duration = growDuration;
-    if (at == null || duration == null) return 0;
+    if (type == null || at == null || duration == null) return 0;
+
     final elapsed = now.difference(at.add(duration)).inMilliseconds;
-    return (1 - elapsed / harvestWindow.inMilliseconds).clamp(0.0, 1.0);
+    final window = Crops.of(type).harvestWindow;
+    return (1 - elapsed / window.inMilliseconds).clamp(0.0, 1.0);
   }
 
   bool isDead(DateTime now) => isPlanted && health(now) == 0;

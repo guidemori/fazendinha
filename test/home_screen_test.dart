@@ -103,12 +103,48 @@ void main() {
     final readyAt = wetAt.add(Plot.plantingDuration).add(crop.growTime);
     expect(wetPlot.isReady(readyAt), isTrue);
     expect(wetPlot.hoe(readyAt), isFalse);
-    final expiry = readyAt.add(Plot.harvestWindow);
+    final expiry = readyAt.add(crop.harvestWindow);
     expect(wetPlot.isDead(expiry), isTrue);
     expect(restored.harvest(wetPlot, expiry), 0);
     expect(wetPlot.hoe(expiry), isTrue);
     expect(wetPlot.isEmpty, isTrue);
     expect(wetPlot.isWet(expiry), isFalse);
+  });
+
+  test('a saúde cai mais devagar em culturas com maturação mais longa', () {
+    final start = DateTime.utc(2026, 1, 1);
+    var previousWindow = Duration.zero;
+
+    for (final type in CropType.values) {
+      final crop = Crops.of(type);
+      final effectiveDuration = crop.growTime ~/ 2;
+      final matureAt = start.add(effectiveDuration);
+      final plot = Plot(id: type.name)
+        ..plantedCrop = type
+        ..plantedAt = start
+        ..growDuration = effectiveDuration;
+      final restored = Plot.fromMap(plot.toMap());
+
+      expect(crop.harvestWindow, greaterThan(previousWindow));
+      expect(crop.harvestWindow, lessThanOrEqualTo(const Duration(hours: 48)));
+      expect(restored.health(start), 1);
+      expect(restored.health(matureAt), 1);
+      expect(restored.health(matureAt.add(crop.harvestWindow ~/ 2)), .5);
+      final expiresAt = matureAt.add(crop.harvestWindow);
+      expect(restored.isReady(expiresAt.subtract(const Duration(seconds: 1))),
+          isTrue);
+      expect(restored.isDead(expiresAt), isTrue);
+      previousWindow = crop.harvestWindow;
+    }
+
+    const slowCrop = Crop(
+      type: CropType.cana,
+      seedCost: 1,
+      sellValue: 1,
+      growTime: Duration(hours: 2),
+      unlockLevel: 1,
+    );
+    expect(slowCrop.harvestWindow, const Duration(hours: 48));
   });
 
   test('fertilizante reduz o tempo restante e persiste o consumo', () {
