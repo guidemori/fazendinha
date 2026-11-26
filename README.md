@@ -13,8 +13,8 @@ que ainda falta para amadurecer.
 
 Use **Colher** para ganhar XP e enviar a produção ao **Armazém**, onde você
 pode vender por espécie ou vender tudo. **Visitas de 7 dias** libera
-recompensas crescentes em moedas e sementes. Cada nova visita exige outra
-data local e um intervalo mínimo de 23 horas pelo relógio do aparelho.
+recompensas crescentes em moedas e sementes. Abra o painel com conexão para
+registrar a visita pela data do servidor em Brasília. O cultivo funciona offline.
 
 O jogo abre em paisagem. O progresso é salvo no Hive e o crescimento usa o
 tempo decorrido desde o plantio, incluindo o tempo com o aplicativo fechado.
@@ -29,3 +29,32 @@ flutter run
 O Android usa o banner de teste do AdMob. Para rodar sem anúncios de teste,
 use `flutter run --dart-define=ENABLE_TEST_ADS=false`. Para a prévia no
 navegador, use `flutter run -d chrome`.
+
+## Serviço de visitas
+
+Execute com Python 3.10 ou posterior e os dados de fuso horário IANA instalados:
+
+```sh
+python3 -m server.visit_rewards --db visits.sqlite3 --web-origin=http://localhost:4173
+```
+
+Em outro terminal, inicie o cliente:
+
+```sh
+flutter run -d chrome --web-port=4173 --dart-define=VISIT_REWARDS_URL=http://127.0.0.1:8090/
+```
+
+Para Android/iOS, configure
+`VISIT_REWARDS_URL` com a URL HTTPS do serviço. Hospede o serviço atrás de um
+proxy TLS com banco persistente. Sem URL, o painel de visitas informa que a
+conexão com o serviço está indisponível.
+
+O serviço identifica o save por uma chave aleatória por instalação. O evento
+verificado começa uma contagem nova e preserva o saldo e o estoque anteriores.
+O saldo da fazenda permanece local. A chave de instalação fica no Hive e não
+oferece recuperação por conta após apagar os dados do aplicativo.
+
+```sh
+python3 -m unittest server.test_visit_rewards
+flutter test
+```

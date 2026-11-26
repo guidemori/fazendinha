@@ -1,6 +1,11 @@
+import 'dart:convert';
+
 import 'package:fazendinhaidle/main.dart';
+import 'package:fazendinhaidle/visit_rewards.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 
 void main() {
   testWidgets('rega, planta, colhe no armazém e vende em paisagem',
@@ -68,20 +73,38 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('permite resgatar a primeira visita no aparelho', (tester) async {
+  testWidgets('registra e resgata a visita usando a resposta do servidor',
+      (tester) async {
     tester.view.physicalSize = const Size(844, 390);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     final player = Player.initial();
-    await tester.pumpWidget(FazendinhaApp(player: player));
+    final calls = <String>[];
+    final api = VisitRewardsApi(
+      Uri.parse('https://visits.example/'),
+      'test-key',
+      client: MockClient((request) async {
+        expect(request.headers['authorization'], 'Bearer test-key');
+        calls.add(request.url.path);
+        if (request.url.path == '/v1/visits') {
+          expect(request.body, isEmpty);
+          return http.Response(jsonEncode(visitResponse(1, 0)), 200);
+        }
+        expect(jsonDecode(request.body), {'day': 1});
+        return http.Response(jsonEncode(visitResponse(1, 1)), 200);
+      }),
+    );
+    await tester.pumpWidget(FazendinhaApp(player: player, visitsApi: api));
     await tester.pumpAndSettle();
+    expect(calls, isEmpty);
     await tester.tap(find.byTooltip('Visitas de 7 dias'));
     await tester.pumpAndSettle();
     expect(find.text('1/7 dias registrados'), findsOneWidget);
     await tester.tap(find.text('Resgatar'));
     await tester.pumpAndSettle();
     expect(find.text('Resgatado'), findsOneWidget);
+    expect(calls, ['/v1/visits', '/v1/claims']);
     expect(player.coins, 27);
     expect(player.seeds[CropType.alface], 1);
     await tester.pumpWidget(const SizedBox.shrink());
@@ -176,45 +199,30 @@ void main() {
     expect(restored.fertilizer, 1);
   });
 
-  test('recompensas crescem e cada data e resgate contam uma vez', () {
-    final first = DateTime(2026, 1, 1, 10);
-    final player = Player.initial();
-    expect(player.recordVisit(first), isTrue);
-    expect(player.claimVisitReward(1), isTrue);
-    expect(player.claimVisitReward(1), isFalse);
-    expect(player.recordVisit(first.add(const Duration(hours: 2))), isFalse);
+  test('reaplica resgates confirmados sem duplicar saldo ou estoque', () {
+    final legacy = Player.initial().toMap()
+      ..['coins'] = 27
+      ..['seeds'] = {'alface': 1}
+      ..['claimedVisitDays'] = 1;
+    final player = Player.fromMap(legacy);
+    expect(player.appliedServerVisitRewards, 0);
+    expect(player.coins, 27);
+
+    player.applyVisitRewards(VisitSnapshot.fromJson(visitResponse(2, 1)));
     final restored = Player.fromMap(player.toMap());
-    expect(restored.recordVisit(first), isFalse);
-    expect(restored.recordVisit(first.add(const Duration(days: 1))), isTrue);
-    expect(restored.claimVisitReward(2), isTrue);
-    expect(restored.coins, 15 + 12 + 24);
-    expect(restored.seeds[CropType.alface], 3);
-  });
-
-  test('visita exige outra data e intervalo de 23 horas após restaurar', () {
-    final first = DateTime(2026, 1, 1, 23);
-    final player = Player.initial();
-    expect(player.recordVisit(first), isTrue);
-
-    final restored = Player.fromMap(player.toMap());
-    expect(restored.recordVisit(first.add(const Duration(hours: 1))), isFalse);
-    expect(
-        restored.recordVisit(first.subtract(const Duration(days: 1))), isFalse);
-    final next = first.add(Player.minVisitGap);
-    expect(restored.recordVisit(next), isTrue);
-    expect(restored.visitDays, 2);
-
-    final legacy = Player.fromMap(player.toMap()..remove('lastVisitAbsolute'));
-    expect(legacy.recordVisit(first), isFalse);
-    expect(legacy.recordVisit(first.add(const Duration(hours: 1))), isTrue);
-    expect(legacy.lastVisitAbsolute, isNotNull);
+    restored.applyVisitRewards(VisitSnapshot.fromJson(visitResponse(2, 2)));
+    restored.applyVisitRewards(VisitSnapshot.fromJson(visitResponse(2, 1)));
+    restored.applyVisitRewards(VisitSnapshot.fromJson(visitResponse(2, 2)));
+    expect(restored.appliedServerVisitRewards, 2);
+    expect(restored.coins, 27 + 12 + 24);
+    expect(restored.seeds[CropType.alface], 4);
   });
 
   test('restaura estoque, solo e progresso de XP com saves anteriores', () {
     final player = Player.initial()..xp = 140;
     final data = player.toMap()
       ..remove('seeds')
-      ..remove('visitDays');
+      ..remove('appliedServerVisitRewards');
     final plots = data['plots'] as List<Map<String, dynamic>>;
     plots.first
       ..remove('wateredAt')
@@ -229,3 +237,12 @@ void main() {
     expect(restored.levelProgress, .2);
   });
 }
+
+Map<String, dynamic> visitResponse(int visited, int claimed) => {
+      'event': 'daily-visits-v1',
+      'visited': visited,
+      'claimed': claimed,
+      'rewards': [
+        for (var day = 1; day <= 7; day++) {'coins': day * 12, 'seeds': day},
+      ],
+    };

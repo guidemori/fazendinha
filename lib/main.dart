@@ -25,6 +25,8 @@ import 'package:flutter/services.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
+import 'visit_rewards.dart';
+
 /// Liga o AdMob apenas em builds Android reais (não na web), usando os IDs
 /// de teste do Google. Nos testes, rode com --dart-define=ENABLE_TEST_ADS=false
 /// para evitar a MissingPluginException do plugin de anúncios.
@@ -407,12 +409,7 @@ class Player {
   final Map<CropType, int> seeds = {};
   static const fertilizerCost = 8;
   int fertilizer = 0;
-  static const visitDayLimit = 7;
-  static const minVisitGap = Duration(hours: 23);
-  int visitDays = 0;
-  int claimedVisitDays = 0;
-  int? lastVisitDay;
-  int? lastVisitAbsolute;
+  int appliedServerVisitRewards = 0;
 
   int get currentLevelXp => xp - xpThresholds[level - 1];
   int? get levelXpGoal {
@@ -420,39 +417,16 @@ class Player {
     return next == null ? null : next - xpThresholds[level - 1];
   }
 
-  bool recordVisit(DateTime now) {
-    final local = now.toLocal();
-    final absoluteDay = DateTime.utc(local.year, local.month, local.day)
-        .difference(DateTime.utc(1970))
-        .inDays;
-    if (visitDays >= visitDayLimit || (lastVisitDay ?? -1) >= absoluteDay) {
-      return false;
+  void applyVisitRewards(VisitSnapshot snapshot) {
+    while (appliedServerVisitRewards < snapshot.claimed) {
+      final reward = snapshot.rewards[appliedServerVisitRewards];
+      coins += reward.coins;
+      if (reward.seeds > 0) {
+        seeds.update(CropType.alface, (amount) => amount + reward.seeds,
+            ifAbsent: () => reward.seeds);
+      }
+      appliedServerVisitRewards++;
     }
-    // Anti-cheat parcial (offline): exige um intervalo mínimo entre
-    // visitas segundo o relógio do aparelho. Bloqueia visitas em sequência rápida e recuos de
-    // relógio, mas não distingue espera real de adiantamento ≥ o intervalo.
-    final utcMs = now.toUtc().millisecondsSinceEpoch;
-    final lastMs = lastVisitAbsolute;
-    if (lastMs != null && utcMs - lastMs < minVisitGap.inMilliseconds) {
-      return false;
-    }
-    lastVisitDay = absoluteDay;
-    lastVisitAbsolute = utcMs;
-    visitDays++;
-    return true;
-  }
-
-  static int visitCoins(int visitNumber) => 12 * visitNumber;
-
-  bool claimVisitReward(int visitNumber) {
-    if (visitNumber != claimedVisitDays + 1 || visitNumber > visitDays) {
-      return false;
-    }
-    coins += visitCoins(visitNumber);
-    seeds.update(CropType.alface, (amount) => amount + visitNumber,
-        ifAbsent: () => visitNumber);
-    claimedVisitDays = visitNumber;
-    return true;
   }
 
   bool buySeed(CropType type) {
@@ -634,10 +608,7 @@ class Player {
         'fertilizer': fertilizer,
         'basket': basket.map((type, amount) => MapEntry(type.name, amount)),
         'seeds': seeds.map((type, amount) => MapEntry(type.name, amount)),
-        'visitDays': visitDays,
-        'claimedVisitDays': claimedVisitDays,
-        'lastVisitDay': lastVisitDay,
-        'lastVisitAbsolute': lastVisitAbsolute,
+        'appliedServerVisitRewards': appliedServerVisitRewards,
         'coins': coins,
         'xp': xp,
         'plotCount': plotCount,
@@ -658,11 +629,9 @@ class Player {
 
     final fertilizer = map['fertilizer'];
     if (fertilizer is int && fertilizer > 0) player.fertilizer = fertilizer;
-    player.visitDays = (map['visitDays'] as int? ?? 0).clamp(0, visitDayLimit);
-    player.claimedVisitDays =
-        (map['claimedVisitDays'] as int? ?? 0).clamp(0, player.visitDays);
-    player.lastVisitDay = map['lastVisitDay'] as int?;
-    player.lastVisitAbsolute = map['lastVisitAbsolute'] as int?;
+    player.appliedServerVisitRewards =
+        (map['appliedServerVisitRewards'] as int? ?? 0)
+            .clamp(0, VisitRewardsApi.dayLimit);
     for (final (key, inventory) in [
       ('basket', player.basket),
       ('seeds', player.seeds)
@@ -1297,10 +1266,14 @@ class HomeScreen extends StatefulWidget {
     super.key,
     required this.player,
     this.onShouldSave,
+    this.visitsApi,
+    this.onVisitRewards,
   });
 
   final Player player;
   final VoidCallback? onShouldSave;
+  final VisitRewardsApi? visitsApi;
+  final Future<void> Function(VisitSnapshot)? onVisitRewards;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -1530,41 +1503,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _showVisits() {
-    final player = widget.player;
-    if (player.recordVisit(DateTime.now())) _farmChanged();
-    _showFarmDialog(
-        'Visitas de 7 dias',
-        (update) => Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                LinearProgressIndicator(
-                    value: player.visitDays / Player.visitDayLimit),
-                Text(
-                    '${player.visitDays}/${Player.visitDayLimit} dias registrados'),
-                for (var day = 1; day <= Player.visitDayLimit; day++)
-                  ListTile(
-                    title: Text('Dia $day'),
-                    subtitle: Text(
-                        '${Player.visitCoins(day)} moedas · $day sementes de alface'),
-                    trailing: TextButton(
-                      onPressed: day == player.claimedVisitDays + 1 &&
-                              day <= player.visitDays
-                          ? () {
-                              if (player.claimVisitReward(day)) {
-                                _farmChanged();
-                                update(() {});
-                              }
-                            }
-                          : null,
-                      child: Text(day <= player.claimedVisitDays
-                          ? 'Resgatado'
-                          : day <= player.visitDays
-                              ? 'Resgatar'
-                              : 'Aguardando'),
-                    ),
-                  ),
-              ],
-            ));
+    showDialog<void>(
+      context: context,
+      builder: (context) => _VisitRewardsDialog(
+        api: widget.visitsApi,
+        onConfirmed: (snapshot) async {
+          final save = widget.onVisitRewards;
+          if (save == null) return;
+          final pending = save(snapshot);
+          if (mounted) setState(() {});
+          await pending;
+        },
+      ),
+    );
   }
 
   static String _formatDuration(Duration d) {
@@ -1794,6 +1745,109 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ),
             )
           : null,
+    );
+  }
+}
+
+class _VisitRewardsDialog extends StatefulWidget {
+  const _VisitRewardsDialog({required this.api, required this.onConfirmed});
+
+  final VisitRewardsApi? api;
+  final Future<void> Function(VisitSnapshot) onConfirmed;
+
+  @override
+  State<_VisitRewardsDialog> createState() => _VisitRewardsDialogState();
+}
+
+class _VisitRewardsDialogState extends State<_VisitRewardsDialog> {
+  VisitSnapshot? _snapshot;
+  bool _busy = false;
+  bool _failed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final api = widget.api;
+    if (api != null) unawaited(_send(api.visit));
+  }
+
+  Future<void> _send(Future<VisitSnapshot> Function() request) async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _failed = false;
+    });
+    try {
+      final confirmed = await request();
+      if (!mounted) return;
+      await widget.onConfirmed(confirmed);
+      if (mounted) setState(() => _snapshot = confirmed);
+    } catch (_) {
+      if (mounted) setState(() => _failed = true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final api = widget.api;
+    final snapshot = _snapshot;
+    final Widget content;
+    if (api == null) {
+      content = const Text('Serviço de visitas indisponível nesta versão.');
+    } else {
+      content = Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (_busy) const LinearProgressIndicator(),
+          if (_failed)
+            const Text(
+                'Não foi possível confirmar o progresso. Tente novamente.'),
+          if (snapshot != null) ...[
+            LinearProgressIndicator(
+              value: snapshot.visited / VisitRewardsApi.dayLimit,
+            ),
+            Text(
+                '${snapshot.visited}/${VisitRewardsApi.dayLimit} dias registrados'),
+            for (final (index, reward) in snapshot.rewards.indexed)
+              ListTile(
+                title: Text('Dia ${index + 1}'),
+                subtitle: Text(
+                    '${reward.coins} moedas · ${reward.seeds} sementes de alface'),
+                trailing: TextButton(
+                  onPressed: !_busy &&
+                          !_failed &&
+                          index == snapshot.claimed &&
+                          index < snapshot.visited
+                      ? () => _send(() => api.claim(index + 1))
+                      : null,
+                  child: Text(index < snapshot.claimed
+                      ? 'Resgatado'
+                      : index < snapshot.visited
+                          ? 'Resgatar'
+                          : 'Aguardando'),
+                ),
+              ),
+          ],
+        ],
+      );
+    }
+    return AlertDialog(
+      title: const Text('Visitas de 7 dias'),
+      content:
+          SizedBox(width: 480, child: SingleChildScrollView(child: content)),
+      actions: [
+        if (api != null)
+          TextButton(
+            onPressed: _busy ? null : () => _send(api.visit),
+            child: const Text('Atualizar'),
+          ),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Fechar'),
+        ),
+      ],
     );
   }
 }
@@ -2087,7 +2141,40 @@ void main() async {
   final box = await Hive.openBox(GameConstants.hiveBoxName);
 
   final player = await _loadOrCreate(box);
-  runApp(FazendinhaApp(player: player, box: box));
+  final visitsApi = await _configureVisits(box);
+  runApp(FazendinhaApp(player: player, box: box, visitsApi: visitsApi));
+}
+
+Future<VisitRewardsApi?> _configureVisits(Box box) async {
+  const url = String.fromEnvironment('VISIT_REWARDS_URL');
+  if (url.isEmpty) return null;
+  var base = Uri.tryParse(url);
+  final loopback = base != null &&
+      const ['localhost', '127.0.0.1', '::1'].contains(base.host);
+  if (base == null ||
+      base.host.isEmpty ||
+      base.userInfo.isNotEmpty ||
+      base.hasQuery ||
+      base.hasFragment ||
+      (base.scheme != 'https' && !(loopback && base.scheme == 'http'))) {
+    debugPrint('VISIT_REWARDS_URL inválida.');
+    return null;
+  }
+  if (!base.path.endsWith('/')) {
+    base = base.replace(path: '${base.path}/');
+  }
+  const keyName = 'visitInstallationKey';
+  try {
+    final saved = box.get(keyName);
+    if (saved is String) return VisitRewardsApi(base, saved);
+    final key = VisitRewardsApi.newInstallationKey();
+    await box.put(keyName, key);
+    await box.flush();
+    return VisitRewardsApi(base, key);
+  } catch (error) {
+    debugPrint('Não foi possível preparar o serviço de visitas: $error');
+    return null;
+  }
 }
 
 Future<Player> _loadOrCreate(Box box) async {
@@ -2102,10 +2189,16 @@ Future<Player> _loadOrCreate(Box box) async {
 }
 
 class FazendinhaApp extends StatefulWidget {
-  const FazendinhaApp({super.key, required this.player, this.box});
+  const FazendinhaApp({
+    super.key,
+    required this.player,
+    this.box,
+    this.visitsApi,
+  });
 
   final Player player;
   final Box? box;
+  final VisitRewardsApi? visitsApi;
 
   @override
   State<FazendinhaApp> createState() => _FazendinhaAppState();
@@ -2114,46 +2207,53 @@ class FazendinhaApp extends StatefulWidget {
 class _FazendinhaAppState extends State<FazendinhaApp>
     with WidgetsBindingObserver {
   Timer? _saveTimer;
+  Future<void> _saveQueue = Future.value();
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    if (widget.player.recordVisit(DateTime.now())) unawaited(_save());
     _saveTimer = Timer.periodic(
       const Duration(seconds: GameConstants.autoSaveSeconds),
       (_) => _save(),
     );
   }
 
-  Future<void> _save() async {
+  Future<void> _persistPlayer() {
     final box = widget.box;
-    if (box == null) return;
-    try {
-      // Aguarda a gravação antes do flush para não perder o progresso se o
-      // app for encerrado logo após plantar/colher/comprar.
+    if (box == null) return Future.value();
+    final write = _saveQueue.then((_) async {
       await box.put(GameConstants.playerKey, widget.player.toMap());
       await box.flush();
-    } catch (e) {
-      // Falha de escrita não deve derrubar o app em segundo plano.
-      debugPrint('Falha ao salvar o progresso: $e');
+    });
+    _saveQueue =
+        write.then<void>((_) {}, onError: (Object _, StackTrace __) {});
+    return write;
+  }
+
+  Future<void> _save() async {
+    try {
+      await _persistPlayer();
+    } catch (error) {
+      debugPrint('Falha ao salvar o progresso: $error');
     }
+  }
+
+  Future<void> _applyVisitRewards(VisitSnapshot snapshot) {
+    widget.player.applyVisitRewards(snapshot);
+    return _persistPlayer();
   }
 
   @override
   void dispose() {
     _saveTimer?.cancel();
+    widget.visitsApi?.close();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed &&
-        widget.player.recordVisit(DateTime.now())) {
-      setState(() {});
-      unawaited(_save());
-    }
     final isBackground = state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive ||
         state == AppLifecycleState.detached;
@@ -2175,6 +2275,8 @@ class _FazendinhaAppState extends State<FazendinhaApp>
       home: HomeScreen(
         player: widget.player,
         onShouldSave: _save,
+        visitsApi: widget.visitsApi,
+        onVisitRewards: _applyVisitRewards,
       ),
     );
   }
