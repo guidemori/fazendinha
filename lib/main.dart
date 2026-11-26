@@ -409,7 +409,8 @@ class Player {
   final Map<CropType, int> seeds = {};
   static const fertilizerCost = 8;
   int fertilizer = 0;
-  int appliedServerVisitRewards = 0;
+  int appliedDailyLoginCoins = 0;
+  int appliedDailyLoginSeeds = 0;
 
   int get currentLevelXp => xp - xpThresholds[level - 1];
   int? get levelXpGoal {
@@ -418,14 +419,15 @@ class Player {
   }
 
   void applyVisitRewards(VisitSnapshot snapshot) {
-    while (appliedServerVisitRewards < snapshot.claimed) {
-      final reward = snapshot.rewards[appliedServerVisitRewards];
-      coins += reward.coins;
-      if (reward.seeds > 0) {
-        seeds.update(CropType.alface, (amount) => amount + reward.seeds,
-            ifAbsent: () => reward.seeds);
-      }
-      appliedServerVisitRewards++;
+    if (snapshot.coinsPaid > appliedDailyLoginCoins) {
+      coins += snapshot.coinsPaid - appliedDailyLoginCoins;
+      appliedDailyLoginCoins = snapshot.coinsPaid;
+    }
+    if (snapshot.seedsPaid > appliedDailyLoginSeeds) {
+      final amount = snapshot.seedsPaid - appliedDailyLoginSeeds;
+      seeds.update(CropType.alface, (stock) => stock + amount,
+          ifAbsent: () => amount);
+      appliedDailyLoginSeeds = snapshot.seedsPaid;
     }
   }
 
@@ -608,7 +610,8 @@ class Player {
         'fertilizer': fertilizer,
         'basket': basket.map((type, amount) => MapEntry(type.name, amount)),
         'seeds': seeds.map((type, amount) => MapEntry(type.name, amount)),
-        'appliedServerVisitRewards': appliedServerVisitRewards,
+        'appliedDailyLoginCoins': appliedDailyLoginCoins,
+        'appliedDailyLoginSeeds': appliedDailyLoginSeeds,
         'coins': coins,
         'xp': xp,
         'plotCount': plotCount,
@@ -629,9 +632,13 @@ class Player {
 
     final fertilizer = map['fertilizer'];
     if (fertilizer is int && fertilizer > 0) player.fertilizer = fertilizer;
-    player.appliedServerVisitRewards =
-        (map['appliedServerVisitRewards'] as int? ?? 0)
-            .clamp(0, VisitRewardsApi.dayLimit);
+    final legacyDays = (map['appliedServerVisitRewards'] as int? ?? 0)
+        .clamp(0, VisitRewardsApi.dayLimit);
+    final legacySeeds = legacyDays * (legacyDays + 1) ~/ 2;
+    player.appliedDailyLoginCoins =
+        map['appliedDailyLoginCoins'] as int? ?? legacySeeds * 12;
+    player.appliedDailyLoginSeeds =
+        map['appliedDailyLoginSeeds'] as int? ?? legacySeeds;
     for (final (key, inventory) in [
       ('basket', player.basket),
       ('seeds', player.seeds)
@@ -1677,7 +1684,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         TextButton(
                             onPressed: _showShop, child: const Text('Loja')),
                         IconButton(
-                          tooltip: 'Visitas de 7 dias',
+                          tooltip: 'Login diário',
                           icon: const Icon(Icons.card_giftcard, size: 20),
                           onPressed: _showVisits,
                         ),
@@ -1806,35 +1813,33 @@ class _VisitRewardsDialogState extends State<_VisitRewardsDialog> {
                 'Não foi possível confirmar o progresso. Tente novamente.'),
           if (snapshot != null) ...[
             LinearProgressIndicator(
-              value: snapshot.visited / VisitRewardsApi.dayLimit,
+              value: snapshot.rewardDay / VisitRewardsApi.dayLimit,
             ),
-            Text(
-                '${snapshot.visited}/${VisitRewardsApi.dayLimit} dias registrados'),
+            Text('Sequência: ${snapshot.streak} dia(s) consecutivo(s)'),
             for (final (index, reward) in snapshot.rewards.indexed)
               ListTile(
-                title: Text('Dia ${index + 1}'),
+                title: Text(index == VisitRewardsApi.dayLimit - 1
+                    ? 'Dia ${index + 1} · Marco da semana'
+                    : 'Dia ${index + 1}'),
                 subtitle: Text(
                     '${reward.coins} moedas · ${reward.seeds} sementes de alface'),
-                trailing: TextButton(
-                  onPressed: !_busy &&
-                          !_failed &&
-                          index == snapshot.claimed &&
-                          index < snapshot.visited
-                      ? () => _send(() => api.claim(index + 1))
-                      : null,
-                  child: Text(index < snapshot.claimed
-                      ? 'Resgatado'
-                      : index < snapshot.visited
-                          ? 'Resgatar'
-                          : 'Aguardando'),
-                ),
+                trailing: index + 1 == snapshot.rewardDay
+                    ? TextButton(
+                        onPressed: !_busy && !_failed && snapshot.claimable
+                            ? () => _send(() => api.claim(snapshot.date))
+                            : null,
+                        child: Text(snapshot.claimedToday
+                            ? 'Resgatado hoje'
+                            : 'Resgatar'),
+                      )
+                    : null,
               ),
           ],
         ],
       );
     }
     return AlertDialog(
-      title: const Text('Visitas de 7 dias'),
+      title: const Text('Login diário'),
       content:
           SizedBox(width: 480, child: SingleChildScrollView(child: content)),
       actions: [
@@ -2208,11 +2213,52 @@ class _FazendinhaAppState extends State<FazendinhaApp>
     with WidgetsBindingObserver {
   Timer? _saveTimer;
   Future<void> _saveQueue = Future.value();
+  bool _syncingDailyLogin = false;
+
+  Future<void> _syncDailyLogin() async {
+    final api = widget.visitsApi;
+    if (api == null || _syncingDailyLogin) return;
+    _syncingDailyLogin = true;
+    try {
+      final snapshot = await api.visit();
+      if (mounted) {
+        final saved = _applyVisitRewards(snapshot);
+        setState(() {});
+        await saved;
+      }
+    } catch (error) {
+      debugPrint('Login diário indisponível: $error');
+    } finally {
+      _syncingDailyLogin = false;
+    }
+  }
+
+  Future<void> _enableDailyReminder() async {
+    if (widget.visitsApi == null ||
+        kIsWeb ||
+        (defaultTargetPlatform != TargetPlatform.android &&
+            defaultTargetPlatform != TargetPlatform.iOS)) {
+      return;
+    }
+    try {
+      await const MethodChannel('little_farm/daily_login_reminder')
+          .invokeMethod<void>('enable');
+    } on PlatformException catch (error) {
+      debugPrint('Não foi possível agendar o lembrete diário: ${error.code}');
+    } on MissingPluginException {
+      // O agendamento é nativo.
+    }
+  }
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(_enableDailyReminder());
+      unawaited(_syncDailyLogin());
+    });
     _saveTimer = Timer.periodic(
       const Duration(seconds: GameConstants.autoSaveSeconds),
       (_) => _save(),
@@ -2254,6 +2300,10 @@ class _FazendinhaAppState extends State<FazendinhaApp>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_enableDailyReminder());
+      unawaited(_syncDailyLogin());
+    }
     final isBackground = state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive ||
         state == AppLifecycleState.detached;

@@ -7,7 +7,7 @@ class VisitRewardsApi {
   VisitRewardsApi(this.base, this.installationKey, {http.Client? client})
       : _client = client ?? http.Client();
 
-  static const event = 'daily-visits-v1';
+  static const event = 'daily-login-v2';
   static const dayLimit = 7;
   final Uri base;
   final String installationKey;
@@ -21,19 +21,19 @@ class VisitRewardsApi {
 
   Future<VisitSnapshot> visit() => _send('visits');
 
-  Future<VisitSnapshot> claim(int day) => _send('claims', day: day);
+  Future<VisitSnapshot> claim(String date) => _send('claims', date: date);
 
   void close() => _client.close();
 
-  Future<VisitSnapshot> _send(String endpoint, {int? day}) async {
+  Future<VisitSnapshot> _send(String endpoint, {String? date}) async {
     final response = await _client
         .post(
-          base.resolve('v1/$endpoint'),
+          base.resolve('v2/$endpoint'),
           headers: {
             'Authorization': 'Bearer $installationKey',
-            if (day != null) 'Content-Type': 'application/json',
+            if (date != null) 'Content-Type': 'application/json',
           },
-          body: day == null ? null : jsonEncode({'day': day}),
+          body: date == null ? null : jsonEncode({'date': date}),
         )
         .timeout(const Duration(seconds: 8));
     if (response.statusCode != 200) {
@@ -45,33 +45,65 @@ class VisitRewardsApi {
 }
 
 class VisitSnapshot {
-  const VisitSnapshot._(this.visited, this.claimed, this.rewards);
+  const VisitSnapshot._({
+    required this.date,
+    required this.streak,
+    required this.rewardDay,
+    required this.claimable,
+    required this.claimedToday,
+    required this.coinsPaid,
+    required this.seedsPaid,
+    required this.rewards,
+  });
 
-  final int visited;
-  final int claimed;
+  final String date;
+  final int streak;
+  final int rewardDay;
+  final bool claimable;
+  final bool claimedToday;
+  final int coinsPaid;
+  final int seedsPaid;
   final List<({int coins, int seeds})> rewards;
 
   factory VisitSnapshot.fromJson(Object? data) {
     if (data is! Map<String, dynamic> ||
         data['event'] != VisitRewardsApi.event) {
-      throw const FormatException('Evento de visitas desconhecido.');
+      throw const FormatException('Evento de login diário desconhecido.');
     }
-    final visited = data['visited'];
-    final claimed = data['claimed'];
+    final date = data['date'];
+    final streak = data['streak'];
+    final rewardDay = data['rewardDay'];
+    final claimable = data['claimable'];
+    final claimedToday = data['claimedToday'];
+    final coinsPaid = data['coinsPaid'];
+    final seedsPaid = data['seedsPaid'];
     final rewards = data['rewards'];
-    if (visited is! int ||
-        claimed is! int ||
-        claimed < 0 ||
-        claimed > visited ||
-        visited > VisitRewardsApi.dayLimit ||
+    if (date is! String ||
+        !RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(date) ||
+        streak is! int ||
+        streak < 1 ||
+        rewardDay is! int ||
+        rewardDay != (streak - 1) % VisitRewardsApi.dayLimit + 1 ||
+        claimable is! bool ||
+        claimedToday is! bool ||
+        (claimable && claimedToday) ||
+        coinsPaid is! int ||
+        coinsPaid < 0 ||
+        seedsPaid is! int ||
+        seedsPaid < 0 ||
         rewards is! List ||
         rewards.length != VisitRewardsApi.dayLimit) {
-      throw const FormatException('Progresso de visitas inválido.');
+      throw const FormatException('Progresso de login diário inválido.');
     }
     return VisitSnapshot._(
-      visited,
-      claimed,
-      List.unmodifiable(rewards.map((reward) {
+      date: date,
+      streak: streak,
+      rewardDay: rewardDay,
+      claimable: claimable,
+      claimedToday: claimedToday,
+      coinsPaid: coinsPaid,
+      seedsPaid: seedsPaid,
+      rewards: List.unmodifiable(rewards.map((reward) {
         if (reward is! Map<String, dynamic> ||
             reward['coins'] is! int ||
             reward['seeds'] is! int ||

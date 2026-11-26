@@ -12,9 +12,10 @@ em crescimento. Cada aplicação consome uma unidade e reduz em 25% o tempo
 que ainda falta para amadurecer.
 
 Use **Colher** para ganhar XP e enviar a produção ao **Armazém**, onde você
-pode vender por espécie ou vender tudo. **Visitas de 7 dias** libera
-recompensas crescentes em moedas e sementes. Abra o painel com conexão para
-registrar a visita pela data do servidor em Brasília. O cultivo funciona offline.
+pode vender por espécie ou vender tudo. **Login diário** registra o acesso pela data do servidor
+em Brasília. Perder uma data retorna ao Dia 1. Faça resgates no dia em que
+forem liberados. As recompensas crescem até o marco do Dia 7 e repetem o ciclo
+se a sequência continuar. O cultivo funciona offline.
 
 O jogo abre em paisagem. O progresso é salvo no Hive e o crescimento usa o
 tempo decorrido desde o plantio, incluindo o tempo com o aplicativo fechado.
@@ -30,7 +31,7 @@ O Android usa o banner de teste do AdMob. Para rodar sem anúncios de teste,
 use `flutter run --dart-define=ENABLE_TEST_ADS=false`. Para a prévia no
 navegador, use `flutter run -d chrome`.
 
-## Serviço de visitas
+## Serviço de login diário
 
 Execute com Python 3.10 ou posterior e os dados de fuso horário IANA instalados:
 
@@ -49,10 +50,14 @@ Para Android/iOS, configure
 proxy TLS com banco persistente. Sem URL, o painel de visitas informa que a
 conexão com o serviço está indisponível.
 
-O serviço identifica o save por uma chave aleatória por instalação. O evento
-verificado começa uma contagem nova e preserva o saldo e o estoque anteriores.
+O serviço identifica o save por uma chave aleatória por instalação. A API v2
+começa uma nova sequência e conserva os créditos acumulados da API v1.
 O saldo da fazenda permanece local. A chave de instalação fica no Hive e não
 oferece recuperação por conta após apagar os dados do aplicativo.
+
+Com a URL configurada, o app pede permissão para notificações no Android e no
+iOS. Se autorizadas, o aparelho agenda um lembrete diário para as 20h de Brasília.
+O Android pode adiar a entrega conforme as regras de economia de bateria.
 
 ```sh
 python3 -m unittest server.test_visit_rewards

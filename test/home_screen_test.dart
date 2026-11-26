@@ -87,24 +87,24 @@ void main() {
       client: MockClient((request) async {
         expect(request.headers['authorization'], 'Bearer test-key');
         calls.add(request.url.path);
-        if (request.url.path == '/v1/visits') {
+        if (request.url.path == '/v2/visits') {
           expect(request.body, isEmpty);
           return http.Response(jsonEncode(visitResponse(1, 0)), 200);
         }
-        expect(jsonDecode(request.body), {'day': 1});
+        expect(jsonDecode(request.body), {'date': '2026-01-01'});
         return http.Response(jsonEncode(visitResponse(1, 1)), 200);
       }),
     );
     await tester.pumpWidget(FazendinhaApp(player: player, visitsApi: api));
     await tester.pumpAndSettle();
-    expect(calls, isEmpty);
-    await tester.tap(find.byTooltip('Visitas de 7 dias'));
+    expect(calls, ['/v2/visits']);
+    await tester.tap(find.byTooltip('Login diário'));
     await tester.pumpAndSettle();
-    expect(find.text('1/7 dias registrados'), findsOneWidget);
+    expect(find.text('Sequência: 1 dia(s) consecutivo(s)'), findsOneWidget);
     await tester.tap(find.text('Resgatar'));
     await tester.pumpAndSettle();
-    expect(find.text('Resgatado'), findsOneWidget);
-    expect(calls, ['/v1/visits', '/v1/claims']);
+    expect(find.text('Resgatado hoje'), findsOneWidget);
+    expect(calls, ['/v2/visits', '/v2/visits', '/v2/claims']);
     expect(player.coins, 27);
     expect(player.seeds[CropType.alface], 1);
     await tester.pumpWidget(const SizedBox.shrink());
@@ -205,7 +205,7 @@ void main() {
       ..['seeds'] = {'alface': 1}
       ..['claimedVisitDays'] = 1;
     final player = Player.fromMap(legacy);
-    expect(player.appliedServerVisitRewards, 0);
+    expect(player.appliedDailyLoginSeeds, 0);
     expect(player.coins, 27);
 
     player.applyVisitRewards(VisitSnapshot.fromJson(visitResponse(2, 1)));
@@ -213,7 +213,7 @@ void main() {
     restored.applyVisitRewards(VisitSnapshot.fromJson(visitResponse(2, 2)));
     restored.applyVisitRewards(VisitSnapshot.fromJson(visitResponse(2, 1)));
     restored.applyVisitRewards(VisitSnapshot.fromJson(visitResponse(2, 2)));
-    expect(restored.appliedServerVisitRewards, 2);
+    expect(restored.appliedDailyLoginSeeds, 3);
     expect(restored.coins, 27 + 12 + 24);
     expect(restored.seeds[CropType.alface], 4);
   });
@@ -239,9 +239,14 @@ void main() {
 }
 
 Map<String, dynamic> visitResponse(int visited, int claimed) => {
-      'event': 'daily-visits-v1',
-      'visited': visited,
-      'claimed': claimed,
+      'event': 'daily-login-v2',
+      'date': '2026-01-01',
+      'streak': visited,
+      'rewardDay': visited,
+      'claimable': claimed < visited,
+      'claimedToday': claimed == visited,
+      'coinsPaid': 12 * claimed * (claimed + 1) ~/ 2,
+      'seedsPaid': claimed * (claimed + 1) ~/ 2,
       'rewards': [
         for (var day = 1; day <= 7; day++) {'coins': day * 12, 'seeds': day},
       ],
