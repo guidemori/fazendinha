@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+const _installUrl = String.fromEnvironment('LITTLE_FARM_INSTALL_URL');
 const _redirect = 'com.guidemori.fazendinhaidle://social-login';
 
 Future<SupabaseClient?> configureSocialFarm() async {
@@ -32,7 +33,10 @@ Future<void> showSocialFarm(BuildContext context, SupabaseClient client) =>
       builder: (context) => StreamBuilder<AuthState>(
         stream: client.auth.onAuthStateChange,
         builder: (context, snapshot) => _SocialFarmDialog(
-          key: ValueKey(client.auth.currentUser?.id),
+          key: ValueKey((
+            client.auth.currentUser?.id,
+            client.auth.currentUser?.lastSignInAt,
+          )),
           client: client,
         ),
       ),
@@ -57,6 +61,7 @@ class _SocialFarmDialogState extends State<_SocialFarmDialog> {
   String? _message;
   bool _busy = false;
   bool _loaded = false;
+  bool _facebookSyncNeeded = false;
 
   SupabaseClient get _client => widget.client;
 
@@ -104,11 +109,54 @@ class _SocialFarmDialogState extends State<_SocialFarmDialog> {
     return result.cast<Map<String, dynamic>>();
   }
 
+  Future<void> _connectFacebook() async {
+    final launched = await _client.auth.signInWithOAuth(
+      OAuthProvider.facebook,
+      scopes: 'user_friends',
+      queryParams: {'auth_type': 'rerequest'},
+      redirectTo: _redirect,
+      authScreenLaunchMode: LaunchMode.externalApplication,
+    );
+    if (!launched && mounted) {
+      _message = 'Não foi possível abrir o login do Facebook.';
+    }
+  }
+
+  Future<bool> _syncFacebook() async {
+    final token = _client.auth.currentSession?.providerToken;
+    if (token == null) return false;
+    try {
+      final result = await _client.functions.invoke(
+        'facebook-friends',
+        body: {'providerToken': token},
+      ).timeout(const Duration(seconds: 15));
+      final data = result.data;
+      return data is Map && data['granted'] == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _shareInvite(String code) async {
+    final link = Uri.tryParse(_installUrl);
+    final install =
+        link != null && link.scheme == 'https' && link.host.isNotEmpty
+            ? '$_installUrl\n'
+            : '';
+    await const MethodChannel('little_farm/social').invokeMethod<void>(
+      'shareInvite',
+      'Venha jogar Little Farm no Android!\n'
+          '$install'
+          'Abra Amigos no jogo e cole meu código:\n$code',
+    );
+  }
+
   Future<void> _refresh({String? name}) async {
     final profile = await _client.rpc(
       'farm_social_profile',
       params: {if (name != null) 'p_name': name},
     ) as Map<String, dynamic>?;
+    final synced = profile != null && await _syncFacebook();
     final friends = profile == null
         ? <Map<String, dynamic>>[]
         : await _rows('farm_social_friends');
@@ -116,6 +164,7 @@ class _SocialFarmDialogState extends State<_SocialFarmDialog> {
         ? <Map<String, dynamic>>[]
         : await _rows('farm_social_inventory');
     if (!mounted) return;
+    _facebookSyncNeeded = profile != null && !synced;
     _profile = profile;
     _friends = friends;
     _inventory = inventory;
@@ -182,20 +231,7 @@ class _SocialFarmDialogState extends State<_SocialFarmDialog> {
             if (_message case final message?) Text(message),
             if (_client.auth.currentUser == null)
               FilledButton(
-                onPressed: _busy
-                    ? null
-                    : () => _run(() async {
-                          final launched = await _client.auth.signInWithOAuth(
-                            OAuthProvider.facebook,
-                            redirectTo: _redirect,
-                            authScreenLaunchMode:
-                                LaunchMode.externalApplication,
-                          );
-                          if (!launched && mounted) {
-                            _message =
-                                'Não foi possível abrir o login do Facebook.';
-                          }
-                        }),
+                onPressed: _busy ? null : () => _run(_connectFacebook),
                 child: const Text('Entrar com Facebook'),
               )
             else if (!_loaded)
@@ -230,6 +266,20 @@ class _SocialFarmDialogState extends State<_SocialFarmDialog> {
                   ),
                 ),
             ] else ...[
+              FilledButton.icon(
+                onPressed: _busy
+                    ? null
+                    : () => _run(
+                        () => _shareInvite(profile['friendCode'] as String)),
+                icon: const Icon(Icons.share),
+                label: const Text('Convidar para jogar'),
+              ),
+              if (_facebookSyncNeeded)
+                TextButton(
+                  onPressed: _busy ? null : () => _run(_connectFacebook),
+                  child: const Text(
+                      'Reconectar para sincronizar amigos do Facebook'),
+                ),
               TextButton.icon(
                 onPressed: _busy
                     ? null

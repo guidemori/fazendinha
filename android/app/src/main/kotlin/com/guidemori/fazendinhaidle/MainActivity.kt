@@ -1,6 +1,7 @@
 package com.guidemori.fazendinhaidle
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import io.flutter.embedding.android.FlutterActivity
@@ -20,6 +21,27 @@ class MainActivity : FlutterActivity() {
             } else {
                 result.notImplemented()
             }
+        }
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "little_farm/social"
+        ).setMethodCallHandler { call, result ->
+            if (call.method != "shareInvite") {
+                result.notImplemented()
+                return@setMethodCallHandler
+            }
+            val message = call.arguments as? String
+            if (message.isNullOrBlank()) {
+                result.error("invalid_invite", "Convite vazio", null)
+                return@setMethodCallHandler
+            }
+
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, message)
+            }
+            startActivity(Intent.createChooser(intent, "Convidar para o Little Farm"))
+            result.success(null)
         }
     }
 

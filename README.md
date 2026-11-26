@@ -93,3 +93,27 @@ do canteiro e registra a colheita no armazém social da conta visitante. Uma
 repetição da mesma colheita não dá outra unidade. A fazenda principal continua
 salva no Hive. Esta fase usa amizades por código. A descoberta automática de
 amigos do Facebook exige configurar o acesso a `user_friends`.
+
+### Amigos do Facebook e convites
+
+Aplique também a migração `20261126000200_facebook_friends.sql` e implante a
+Edge Function `facebook-friends` no mesmo projeto Supabase:
+
+```bash
+supabase functions deploy facebook-friends --project-ref <projeto> --no-verify-jwt
+```
+
+A função valida o JWT com o Supabase Auth antes de consultar a Meta. A
+migração exige que a identidade do Facebook consultada corresponda à conta do
+Little Farm. O app solicita `user_friends` no login. Com acesso à permissão
+habilitado na Meta, duas contas que autorizaram essa permissão e criaram seus
+perfis aparecem automaticamente em **Amigos** após sincronizar. A confirmação
+vale por sete dias e pode ser renovada ao atualizar a lista ou reconectar. A
+sincronização bem-sucedida substitui os vínculos da Meta daquela conta e
+preserva as amizades por código. Falhas de rede preservam a última confirmação
+até que ela expire.
+
+Para incluir o link de instalação no botão **Convidar para jogar**, passe
+`--dart-define=LITTLE_FARM_INSTALL_URL=https://<link-de-instalacao>`. O botão
+abre o compartilhamento do Android com o texto e o código de amigo. O
+jogador escolhe o destinatário e confirma o envio no app de mensagens.
