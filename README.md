@@ -63,3 +63,33 @@ O Android pode adiar a entrega conforme as regras de economia de bateria.
 python3 -m unittest server.test_visit_rewards
 flutter test
 ```
+
+## Piloto social no Android
+
+Crie um projeto Supabase e aplique a migração
+`supabase/migrations/20261126000100_social_pilot.sql`. Configure o provedor
+Facebook no Supabase usando o ID e o segredo do app da Meta. Na Meta, permita
+o callback HTTPS mostrado no painel do Supabase e adicione as contas que
+participarão do piloto. Configure a URL de retorno
+`com.guidemori.fazendinhaidle://social-login` na lista de URLs permitidas do
+Supabase. O segredo do Facebook fica no Supabase.
+
+Execute em um aparelho Android conectado:
+
+```bash
+flutter run -d <id-do-aparelho> \
+  --dart-define=SUPABASE_URL=https://<projeto>.supabase.co \
+  --dart-define=SUPABASE_PUBLISHABLE_KEY=<chave-publicavel>
+```
+
+O botão **Amigos** aparece com essa configuração. Entre via Facebook, crie um
+perfil e copie o código de amigo. Na segunda conta, repita o login e cole o
+código para vincular as duas fazendas. Compartilhe o código somente com quem
+você quer adicionar, pois usá-lo estabelece a amizade imediatamente.
+
+Cada perfil tem um canteiro de teste com uma cenoura pronta. Visite a primeira
+fazenda com a segunda conta e colha a cenoura. A operação debita uma unidade
+do canteiro e registra a colheita no armazém social da conta visitante. Uma
+repetição da mesma colheita não dá outra unidade. A fazenda principal continua
+salva no Hive. Esta fase usa amizades por código. A descoberta automática de
+amigos do Facebook exige configurar o acesso a `user_friends`.

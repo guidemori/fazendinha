@@ -24,7 +24,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'social_farm.dart';
 import 'visit_rewards.dart';
 
 /// Liga o AdMob apenas em builds Android reais (não na web), usando os IDs
@@ -1274,12 +1276,14 @@ class HomeScreen extends StatefulWidget {
     required this.player,
     this.onShouldSave,
     this.visitsApi,
+    this.socialClient,
     this.onVisitRewards,
   });
 
   final Player player;
   final VoidCallback? onShouldSave;
   final VisitRewardsApi? visitsApi;
+  final SupabaseClient? socialClient;
   final Future<void> Function(VisitSnapshot)? onVisitRewards;
 
   @override
@@ -1683,6 +1687,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             child: Text('Armazém ${player.basketCount}')),
                         TextButton(
                             onPressed: _showShop, child: const Text('Loja')),
+                        if (widget.socialClient case final client?)
+                          IconButton(
+                            tooltip: 'Amigos',
+                            icon: const Icon(Icons.people, size: 20),
+                            onPressed: () => showSocialFarm(context, client),
+                          ),
                         IconButton(
                           tooltip: 'Login diário',
                           icon: const Icon(Icons.card_giftcard, size: 20),
@@ -2147,7 +2157,13 @@ void main() async {
 
   final player = await _loadOrCreate(box);
   final visitsApi = await _configureVisits(box);
-  runApp(FazendinhaApp(player: player, box: box, visitsApi: visitsApi));
+  final socialClient = await configureSocialFarm();
+  runApp(FazendinhaApp(
+    player: player,
+    box: box,
+    visitsApi: visitsApi,
+    socialClient: socialClient,
+  ));
 }
 
 Future<VisitRewardsApi?> _configureVisits(Box box) async {
@@ -2199,11 +2215,13 @@ class FazendinhaApp extends StatefulWidget {
     required this.player,
     this.box,
     this.visitsApi,
+    this.socialClient,
   });
 
   final Player player;
   final Box? box;
   final VisitRewardsApi? visitsApi;
+  final SupabaseClient? socialClient;
 
   @override
   State<FazendinhaApp> createState() => _FazendinhaAppState();
@@ -2326,6 +2344,7 @@ class _FazendinhaAppState extends State<FazendinhaApp>
         player: widget.player,
         onShouldSave: _save,
         visitsApi: widget.visitsApi,
+        socialClient: widget.socialClient,
         onVisitRewards: _applyVisitRewards,
       ),
     );
