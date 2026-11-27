@@ -130,16 +130,22 @@ class Crop {
   const Crop({
     required this.type,
     required this.seedCost,
-    required this.sellValue,
+    required int sellValue,
     required this.growTime,
     required this.unlockLevel,
-  });
+  }) : _baseSellValue = sellValue;
 
   final CropType type;
   final int seedCost;
-  final int sellValue;
+  final int _baseSellValue;
   final Duration growTime;
   final int unlockLevel;
+
+  int get sellValue {
+    final hours = growTime.inMilliseconds / Duration.millisecondsPerHour;
+    final baseProfit = _baseSellValue - seedCost;
+    return _baseSellValue + (baseProfit * .03 * hours).round();
+  }
 
   static const maxHarvestWindow = Duration(hours: 48);
   static const harvestWindowMultiplier = 48;

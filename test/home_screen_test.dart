@@ -8,6 +8,11 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 void main() {
+  test('preço de venda inclui bônus de 3% do lucro por hora de maturação', () {
+    final saleValues = CropType.values.map((type) => Crops.of(type).sellValue);
+    expect(saleValues, [8, 40, 191, 322, 556, 1319, 2265, 3982]);
+  });
+
   for (final type in CropType.values) {
     testWidgets('adubo acelera o visual de ${type.label} durante o crescimento',
         (tester) async {
