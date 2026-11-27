@@ -402,7 +402,11 @@ void main() {
         ..growDuration = effectiveDuration;
       final restored = Plot.fromMap(plot.toMap());
 
-      expect(crop.harvestWindow, greaterThan(previousWindow));
+      expect(
+          crop.harvestWindow,
+          previousWindow == Crop.maxHarvestWindow
+              ? Crop.maxHarvestWindow
+              : greaterThan(previousWindow));
       expect(crop.harvestWindow, lessThanOrEqualTo(const Duration(hours: 48)));
       expect(restored.health(start), 1);
       expect(restored.health(matureAt), 1);
