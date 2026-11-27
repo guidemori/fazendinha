@@ -36,6 +36,11 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Alface'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('Comprar por 5 moedas'));
+    await tester.pumpAndSettle();
+    expect(find.text('Loja de sementes'), findsOneWidget);
+    await tester.tap(find.byTooltip('Fechar loja'));
+    await tester.pumpAndSettle();
     expect(player.coins, 10);
     expect(player.seeds[CropType.alface], 1);
     await tester.tap(find.byTooltip('Sementes'));
@@ -77,6 +82,14 @@ void main() {
     expect(player.coins, 10);
 
     plot.plantedAt = DateTime.now().subtract(const Duration(minutes: 1));
+    await tester.pump(const Duration(seconds: 1));
+    final readyCenter = tester.getCenter(tile);
+    final readyInspection =
+        await tester.startGesture(readyCenter - const Offset(48, 0));
+    await readyInspection.moveTo(readyCenter);
+    await tester.pump();
+    expect(find.textContaining('Apodrece em '), findsOneWidget);
+    await readyInspection.up();
     await tester.tap(find.byTooltip('Colher'));
     await tester.tap(tile);
     await tester.pump();
@@ -129,6 +142,31 @@ void main() {
     expect(tester.getCenter(plots.first), first);
     expect(tester.getRect(plots.last), pending);
     expect(expansion, findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('compra em lote é limitada pelo saldo e mantém a loja aberta',
+      (tester) async {
+    final player = Player.initial()..coins = 25;
+    await tester.pumpWidget(FazendinhaApp(player: player));
+    await tester.tap(find.text('Loja'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Alface'));
+    await tester.pumpAndSettle();
+    for (var i = 0; i < 4; i++) {
+      await tester.tap(find.byTooltip('Aumentar quantidade'));
+      await tester.pumpAndSettle();
+    }
+    expect(find.text('5 / 5'), findsOneWidget);
+    final plus =
+        tester.widget<IconButton>(find.widgetWithIcon(IconButton, Icons.add));
+    expect(plus.onPressed, isNull);
+    await tester.tap(find.text('Comprar por 25 moedas'));
+    await tester.pumpAndSettle();
+    expect(player.coins, 0);
+    expect(player.seeds[CropType.alface], 5);
+    expect(find.text('Loja de sementes'), findsOneWidget);
+    expect(find.text('Saldo: 0 moedas'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 

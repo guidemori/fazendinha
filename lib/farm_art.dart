@@ -94,3 +94,74 @@ class _CropSoilRim extends CustomPainter {
   bool shouldRepaint(_CropSoilRim oldDelegate) =>
       stage != oldDelegate.stage || inset != oldDelegate.inset;
 }
+
+class _FarmActionEffect extends StatelessWidget {
+  const _FarmActionEffect({super.key, required this.tool, required this.onEnd});
+
+  final VoidCallback onEnd;
+
+  final _FarmTool tool;
+
+  @override
+  Widget build(BuildContext context) {
+    final water = tool == _FarmTool.water;
+    final fertilizer = tool == _FarmTool.fertilizer;
+    final harvest = tool == _FarmTool.harvest;
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: Duration(milliseconds: water ? 950 : 550),
+      onEnd: onEnd,
+      child: Image.asset(_farmIcon(tool.name),
+          width: 39, height: 39, excludeFromSemantics: true),
+      builder: (context, progress, sprite) {
+        if (progress >= 1) return const SizedBox.shrink();
+        final strike = math.sin(progress * math.pi);
+        return SizedBox(
+          width: 60,
+          height: 66,
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Positioned(
+                left: 9,
+                top: 3 + strike * (harvest ? 17 : 9),
+                child: Opacity(
+                  opacity: math.min(1, (1 - progress) * 5),
+                  child: Transform.rotate(
+                    angle: strike *
+                        (water
+                            ? .62
+                            : tool == _FarmTool.hoe
+                                ? -.63
+                                : .24),
+                    child: sprite,
+                  ),
+                ),
+              ),
+              if (water || fertilizer || tool == _FarmTool.hoe)
+                for (var i = 0; i < 4; i++)
+                  Positioned(
+                    left: 18 + i * 6 + strike * i,
+                    top: 31 + ((progress * 2 + i * .15) % 1) * 21,
+                    child: Icon(
+                      water
+                          ? Icons.water_drop
+                          : fertilizer
+                              ? Icons.auto_awesome
+                              : Icons.circle,
+                      size: water ? 8 : 6,
+                      color: (water
+                              ? const Color(0xff8cdaff)
+                              : fertilizer
+                                  ? const Color(0xffc8ed75)
+                                  : const Color(0xffbb8b59))
+                          .withValues(alpha: math.min(1, (1 - progress) * 4)),
+                    ),
+                  ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}

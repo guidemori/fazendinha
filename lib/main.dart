@@ -435,12 +435,12 @@ class Player {
     }
   }
 
-  bool buySeed(CropType type) {
+  bool buySeed(CropType type, {int quantity = 1}) {
     if (!isUnlocked(type)) return false;
     final cost = effectiveSeedCost(Crops.of(type));
-    if (coins < cost) return false;
-    coins -= cost;
-    seeds.update(type, (amount) => amount + 1, ifAbsent: () => 1);
+    if (quantity <= 0 || quantity > coins ~/ cost) return false;
+    coins -= cost * quantity;
+    seeds.update(type, (amount) => amount + quantity, ifAbsent: () => quantity);
     return true;
   }
 
@@ -1049,7 +1049,7 @@ class NewPlotPainter extends CustomPainter {
 // ------------------------------------------------------------
 // [ui/widgets/crop_selector_sheet.dart]  Seletor de culturas
 // ------------------------------------------------------------
-class CropSelectorSheet extends StatelessWidget {
+class CropSelectorSheet extends StatefulWidget {
   const CropSelectorSheet({
     super.key,
     required this.player,
@@ -1058,8 +1058,17 @@ class CropSelectorSheet extends StatelessWidget {
   });
 
   final Player player;
-  final ValueChanged<CropType> onSelected;
+  final void Function(CropType, int quantity) onSelected;
   final VoidCallback onBuyFertilizer;
+
+  @override
+  State<CropSelectorSheet> createState() => _CropSelectorSheetState();
+}
+
+class _CropSelectorSheetState extends State<CropSelectorSheet> {
+  CropType? _selected;
+  int _quantity = 1;
+  Player get player => widget.player;
 
   String _formatDuration(Duration d) {
     if (d.inHours > 0) {
@@ -1081,9 +1090,21 @@ class CropSelectorSheet extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text(
-              'Loja de sementes',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            Row(
+              children: [
+                const Expanded(
+                  child: Text('Loja de sementes',
+                      style:
+                          TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                ),
+                Text('Saldo: ${player.coins} moedas'),
+                const SizedBox(width: 8),
+                IconButton(
+                  tooltip: 'Fechar loja',
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.close),
+                ),
+              ],
             ),
             const SizedBox(height: 12),
             ListTile(
@@ -1094,7 +1115,7 @@ class CropSelectorSheet extends StatelessWidget {
                   '−25% do tempo restante · estoque: ${player.fertilizer}'),
               trailing: TextButton(
                 onPressed: player.coins >= Player.fertilizerCost
-                    ? onBuyFertilizer
+                    ? widget.onBuyFertilizer
                     : null,
                 child: const Text('Comprar por ${Player.fertilizerCost}'),
               ),
@@ -1112,89 +1133,131 @@ class CropSelectorSheet extends StatelessWidget {
                   final canAfford = player.coins >= cost;
                   final isNew = player.isNewlyUnlocked(type);
 
-                  return ListTile(
-                    leading: Opacity(
-                      opacity: unlocked ? 1.0 : 0.4,
-                      child: _CropArtwork(type: type),
-                    ),
-                    title: Row(
-                      children: [
-                        Text(
-                          crop.label,
-                          style: unlocked
-                              ? null
-                              : const TextStyle(color: Colors.grey),
-                        ),
-                        if (isNew) ...[
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: Colors.orange,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: const Text(
-                              'Novo!',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          unlocked
-                              ? (canAfford
-                                  ? 'Semente 🪙 $cost · Vende 🪙 $sell'
-                                  : 'Semente 🪙 $cost · Faltam 🪙 ${cost - player.coins}')
-                              : 'Requer nível ${crop.unlockLevel}',
-                        ),
-                        if (unlocked) ...[
-                          const SizedBox(height: 2),
+                  final maxQuantity = player.coins ~/ cost;
+                  final quantity = math.min(_quantity, maxQuantity);
+                  return Column(children: [
+                    ListTile(
+                      leading: Opacity(
+                        opacity: unlocked ? 1.0 : 0.4,
+                        child: _CropArtwork(type: type),
+                      ),
+                      title: Row(
+                        children: [
                           Text(
-                            '⏱️ ${_formatDuration(player.effectiveGrowTime(crop))}',
-                            style: const TextStyle(fontSize: 12),
+                            crop.label,
+                            style: unlocked
+                                ? null
+                                : const TextStyle(color: Colors.grey),
                           ),
-                        ],
-                      ],
-                    ),
-                    isThreeLine: unlocked,
-                    trailing: unlocked
-                        ? const Icon(Icons.chevron_right, color: Colors.green)
-                        : const Icon(Icons.lock_outline, color: Colors.grey),
-                    onTap: () {
-                      if (!unlocked) {
-                        ScaffoldMessenger.of(context)
-                          ..hideCurrentSnackBar()
-                          ..showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                'Requer nível ${crop.unlockLevel} para plantar ${crop.label}.',
+                          if (isNew) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.orange,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: const Text(
+                                'Novo!',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
                             ),
-                          );
-                        return;
-                      }
-                      if (!canAfford) {
-                        ScaffoldMessenger.of(context)
-                          ..hideCurrentSnackBar()
-                          ..showSnackBar(SnackBar(
-                            content: Text(
-                                'Moedas insuficientes! Faltam ${cost - player.coins}.'),
-                          ));
-                        return;
-                      }
-                      onSelected(type);
-                      Navigator.pop(context);
-                    },
-                  );
+                          ],
+                        ],
+                      ),
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            unlocked
+                                ? (canAfford
+                                    ? 'Semente 🪙 $cost · Vende 🪙 $sell'
+                                    : 'Semente 🪙 $cost · Faltam 🪙 ${cost - player.coins}')
+                                : 'Requer nível ${crop.unlockLevel}',
+                          ),
+                          if (unlocked) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              '⏱️ ${_formatDuration(player.effectiveGrowTime(crop))}',
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                          ],
+                        ],
+                      ),
+                      isThreeLine: unlocked,
+                      trailing: unlocked
+                          ? const Icon(Icons.chevron_right, color: Colors.green)
+                          : const Icon(Icons.lock_outline, color: Colors.grey),
+                      onTap: () {
+                        if (!unlocked) {
+                          ScaffoldMessenger.of(context)
+                            ..hideCurrentSnackBar()
+                            ..showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  'Requer nível ${crop.unlockLevel} para plantar ${crop.label}.',
+                                ),
+                              ),
+                            );
+                          return;
+                        }
+                        if (!canAfford) {
+                          ScaffoldMessenger.of(context)
+                            ..hideCurrentSnackBar()
+                            ..showSnackBar(SnackBar(
+                              content: Text(
+                                  'Moedas insuficientes! Faltam ${cost - player.coins}.'),
+                            ));
+                          return;
+                        }
+                        setState(() {
+                          _selected = type;
+                          _quantity = 1;
+                        });
+                      },
+                    ),
+                    if (_selected == type && unlocked && canAfford)
+                      Padding(
+                        padding: const EdgeInsets.only(
+                            left: 16, right: 16, bottom: 8),
+                        child: Wrap(
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          spacing: 6,
+                          children: [
+                            IconButton(
+                              tooltip: 'Diminuir quantidade',
+                              onPressed: quantity <= 1
+                                  ? null
+                                  : () =>
+                                      setState(() => _quantity = quantity - 1),
+                              icon: const Icon(Icons.remove),
+                            ),
+                            Text('$quantity / $maxQuantity'),
+                            IconButton(
+                              tooltip: 'Aumentar quantidade',
+                              onPressed: quantity >= maxQuantity
+                                  ? null
+                                  : () =>
+                                      setState(() => _quantity = quantity + 1),
+                              icon: const Icon(Icons.add),
+                            ),
+                            FilledButton(
+                              onPressed: () {
+                                widget.onSelected(type, quantity);
+                                setState(() => _quantity = 1);
+                              },
+                              child:
+                                  Text('Comprar por ${cost * quantity} moedas'),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ]);
                 },
               ),
             ),
@@ -1344,6 +1407,7 @@ enum _FarmTool { hoe, seed, water, fertilizer, harvest }
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   _FarmTool _tool = _FarmTool.harvest;
+  ({Plot plot, _FarmTool tool, Object id})? _action;
   Plot? _plantingPlot;
   Timer? _plantHold;
   Plot? _focusedPlot;
@@ -1512,6 +1576,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (planted) widget.onShouldSave?.call();
       setState(() {
         _plantingPlot = null;
+        if (planted) _action = (plot: plot, tool: _FarmTool.seed, id: Object());
         _plotHint = planted
             ? null
             : 'Plantio não concluído. Confira o solo e as sementes.';
@@ -1531,6 +1596,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _plantHold = null;
     setState(() {
       _tool = tool;
+      _action = null;
       _plantingPlot = null;
       _focusedPlot = null;
       _plotHint = null;
@@ -1560,6 +1626,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
     if (changed) widget.onShouldSave?.call();
     setState(() {
+      if (changed) _action = (plot: plot, tool: _tool, id: Object());
       _focusedPlot = plot;
       _plotHint = hint;
     });
@@ -1713,8 +1780,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       builder: (context) => StatefulBuilder(
         builder: (context, update) => CropSelectorSheet(
           player: widget.player,
-          onSelected: (seed) {
-            if (widget.player.buySeed(seed)) _farmChanged();
+          onSelected: (seed, quantity) {
+            if (widget.player.buySeed(seed, quantity: quantity)) {
+              _farmChanged();
+              update(() {});
+            }
           },
           onBuyFertilizer: () {
             if (widget.player.buyFertilizer()) {
@@ -1824,6 +1894,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         children: [
           _FarmScene(
             player: player,
+            tool: _tool,
+            action: _action,
+            onActionEnd: (id) {
+              if (mounted && identical(_action?.id, id)) {
+                setState(() => _action = null);
+              }
+            },
             onPlotTap: _handlePlotTap,
             onBuyPlot: _buyNewPlot,
             focusedPlot: _focusedPlot,
@@ -1840,43 +1917,46 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 Align(
                   alignment: Alignment.topLeft,
                   child: _FarmPanel(
+                      translucent: true,
                       child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      _FarmProfileAvatar(client: widget.socialClient),
-                      _LevelStatus(player: player),
-                      Tooltip(
-                        message: 'Moedas disponíveis',
-                        child: Row(mainAxisSize: MainAxisSize.min, children: [
-                          Image.asset(_farmIcon('coin'),
-                              width: 21,
-                              height: 21,
-                              excludeFromSemantics: true),
-                          Text(' ${player.coins}'),
-                        ]),
-                      ),
-                      if (MediaQuery.sizeOf(context).width >= 610) ...[
-                        const SizedBox(width: 12),
-                        Tooltip(
-                          message: 'Canteiros cultiváveis',
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Image.asset(_farmIcon('sprout'),
-                                  width: 20,
-                                  height: 20,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _FarmProfileAvatar(client: widget.socialClient),
+                          _LevelStatus(player: player),
+                          Tooltip(
+                            message: 'Moedas disponíveis',
+                            child:
+                                Row(mainAxisSize: MainAxisSize.min, children: [
+                              Image.asset(_farmIcon('coin'),
+                                  width: 21,
+                                  height: 21,
                                   excludeFromSemantics: true),
-                              Text(' ${player.plots.length}'),
-                            ],
+                              Text(' ${player.coins}'),
+                            ]),
                           ),
-                        ),
-                      ],
-                    ],
-                  )),
+                          if (MediaQuery.sizeOf(context).width >= 610) ...[
+                            const SizedBox(width: 12),
+                            Tooltip(
+                              message: 'Canteiros cultiváveis',
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Image.asset(_farmIcon('sprout'),
+                                      width: 20,
+                                      height: 20,
+                                      excludeFromSemantics: true),
+                                  Text(' ${player.plots.length}'),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ],
+                      )),
                 ),
                 Align(
                   alignment: Alignment.topRight,
                   child: _FarmPanel(
+                    translucent: true,
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -1943,6 +2023,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   child: SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
                     child: _FarmPanel(
+                      translucent: true,
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -2084,7 +2165,9 @@ class _VisitRewardsDialogState extends State<_VisitRewardsDialog> {
 }
 
 class _FarmPanel extends StatelessWidget {
-  const _FarmPanel({required this.child});
+  const _FarmPanel({required this.child, this.translucent = false});
+
+  final bool translucent;
 
   final Widget child;
 
@@ -2092,8 +2175,8 @@ class _FarmPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     const foreground = Color(0xfffff5d8);
     return Material(
-      color: const Color(0xf0223528),
-      elevation: 3,
+      color: translucent ? const Color(0x9e15281d) : const Color(0xf0223528),
+      elevation: translucent ? 0 : 3,
       borderRadius: BorderRadius.circular(15),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -2215,9 +2298,12 @@ class _LevelStatus extends StatelessWidget {
 /// de [GameConstants.plotCenterForIndex]. A cena escala à largura da tela e
 /// o toque é identificado pelo mesmo mapeamento, sem ambiguidade na borda
 /// compartilhada (garantida pelo recorte de hit-test de cada canteiro).
-class _FarmScene extends StatelessWidget {
+class _FarmScene extends StatefulWidget {
   const _FarmScene({
     required this.player,
+    required this.tool,
+    required this.action,
+    required this.onActionEnd,
     required this.onPlotTap,
     required this.onBuyPlot,
     required this.focusedPlot,
@@ -2229,6 +2315,9 @@ class _FarmScene extends StatelessWidget {
   });
 
   final Player player;
+  final _FarmTool tool;
+  final ({Plot plot, _FarmTool tool, Object id})? action;
+  final ValueChanged<Object> onActionEnd;
   final void Function(Plot plot) onPlotTap;
   final VoidCallback onBuyPlot;
   final Plot? focusedPlot;
@@ -2239,7 +2328,22 @@ class _FarmScene extends StatelessWidget {
   final ValueChanged<Plot?>? onInspect;
 
   @override
+  State<_FarmScene> createState() => _FarmSceneState();
+}
+
+class _FarmSceneState extends State<_FarmScene> {
+  final _pointer = ValueNotifier<Offset?>(null);
+
+  @override
+  void dispose() {
+    _pointer.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final scene = widget;
+    final player = scene.player;
     return LayoutBuilder(
       builder: (context, constraints) {
         final w = constraints.maxWidth;
@@ -2275,30 +2379,43 @@ class _FarmScene extends StatelessWidget {
             GameConstants.plotCenterForIndex(i).dy * scale -
             tileH / 2;
 
-        final focus =
-            player.plots.indexWhere((plot) => identical(plot, focusedPlot));
+        final actionIndex = player.plots.indexWhere(
+          (plot) => identical(plot, scene.action?.plot),
+        );
+        final actionCenter = actionIndex < 0
+            ? null
+            : Offset(leftFor(actionIndex) + tileW / 2,
+                topFor(actionIndex) + tileH / 2);
+
+        final focus = player.plots
+            .indexWhere((plot) => identical(plot, scene.focusedPlot));
         void inspectAt(Offset p) {
           for (var i = player.plots.length - 1; i >= 0; i--) {
             final dx = (p.dx - leftFor(i) - tileW / 2).abs() / (tileW / 2);
             final dy = (p.dy - topFor(i) - tileH / 2).abs() / (tileH / 2);
             if (dx + dy <= 1) {
-              onInspect?.call(player.plots[i]);
+              scene.onInspect?.call(player.plots[i]);
               return;
             }
           }
-          onInspect?.call(null);
+          scene.onInspect?.call(null);
         }
 
         return MouseRegion(
-          cursor:
-              onInspect == null ? MouseCursor.defer : SystemMouseCursors.grab,
-          onHover: onInspect == null
-              ? null
-              : (event) => inspectAt(event.localPosition),
-          onExit: onInspect == null ? null : (_) => onInspect?.call(null),
+          cursor: SystemMouseCursors.none,
+          onEnter: (event) => _pointer.value = event.localPosition,
+          onHover: (event) {
+            _pointer.value = event.localPosition;
+            if (scene.onInspect != null) inspectAt(event.localPosition);
+          },
+          onExit: (_) {
+            if (!mounted) return;
+            _pointer.value = null;
+            scene.onInspect?.call(null);
+          },
           child: Listener(
             behavior: HitTestBehavior.opaque,
-            onPointerMove: onInspect == null
+            onPointerMove: scene.onInspect == null
                 ? null
                 : (event) => inspectAt(event.localPosition),
             child: ColoredBox(
@@ -2320,13 +2437,13 @@ class _FarmScene extends StatelessWidget {
                       height: tileH,
                       child: PlotWidget(
                         plot: player.plots[i],
-                        onTap: () => onPlotTap(player.plots[i]),
-                        onPressStart: onPressStart == null
+                        onTap: () => scene.onPlotTap(player.plots[i]),
+                        onPressStart: scene.onPressStart == null
                             ? null
-                            : () => onPressStart!(player.plots[i]),
-                        onPressEnd: onPressEnd == null
+                            : () => scene.onPressStart!(player.plots[i]),
+                        onPressEnd: scene.onPressEnd == null
                             ? null
-                            : () => onPressEnd!(player.plots[i]),
+                            : () => scene.onPressEnd!(player.plots[i]),
                       ),
                     ),
                   if (player.canBuyMorePlots && tileCount > 0)
@@ -2338,7 +2455,7 @@ class _FarmScene extends StatelessWidget {
                       child: NewPlotTile(
                         cost: player.nextPlotCost,
                         enabled: player.coins >= player.nextPlotCost,
-                        onTap: onBuyPlot,
+                        onTap: scene.onBuyPlot,
                       ),
                     ),
                   if (focus >= 0)
@@ -2350,11 +2467,44 @@ class _FarmScene extends StatelessWidget {
                       child: IgnorePointer(
                         child: _PlotNotice(
                             plot: player.plots[focus],
-                            hint: plotHint,
-                            planting:
-                                identical(player.plots[focus], plantingPlot)),
+                            hint: scene.plotHint,
+                            planting: identical(
+                                player.plots[focus], scene.plantingPlot)),
                       ),
                     ),
+                  if (scene.action case final action? when actionCenter != null)
+                    Positioned(
+                      left: actionCenter.dx - 30,
+                      top: actionCenter.dy - 41,
+                      child: IgnorePointer(
+                        child: _FarmActionEffect(
+                          key: ObjectKey(action.id),
+                          tool: action.tool,
+                          onEnd: () => scene.onActionEnd(action.id),
+                        ),
+                      ),
+                    ),
+                  IgnorePointer(
+                    child: ValueListenableBuilder<Offset?>(
+                      valueListenable: _pointer,
+                      builder: (context, pointer, _) => Stack(
+                        children: [
+                          if (pointer != null &&
+                              (actionCenter == null ||
+                                  (pointer - actionCenter).distance >
+                                      tileW / 2))
+                            Positioned(
+                              left: pointer.dx - 5,
+                              top: pointer.dy - 6,
+                              child: Image.asset(_farmIcon(scene.tool.name),
+                                  width: 36,
+                                  height: 36,
+                                  excludeFromSemantics: true),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -2397,12 +2547,22 @@ class _PlotNotice extends StatelessWidget {
     } else if (plot.isPlanted) {
       final health = (plot.health(now) * 100).ceil();
       final end = plot.plantedAt!.add(plot.growDuration!);
-      final remaining = end.difference(now);
-      label = plot.isReady(now)
-          ? '${plot.plantedCrop!.label} pronta para colher'
-          : '${plot.plantedCrop!.label} crescendo';
-      details =
-          'Saúde $health/100${remaining.isNegative ? '' : ' · Colheita em ${_HomeScreenState._formatDuration(remaining)}'}';
+      final ready = plot.isReady(now);
+      final crop = Crops.of(plot.plantedCrop!);
+      label = ready
+          ? '${crop.label} pronta para colher'
+          : '${crop.label} crescendo';
+      if (ready) {
+        final remaining = end.add(crop.harvestWindow).difference(now);
+        final seconds = (remaining.inMilliseconds / 1000).ceil();
+        final minutes = (seconds ~/ 60 % 60).toString().padLeft(2, '0');
+        final remainder = (seconds % 60).toString().padLeft(2, '0');
+        details =
+            'Saúde $health/100\nApodrece em ${seconds ~/ 3600}:$minutes:$remainder';
+      } else {
+        final remaining = _HomeScreenState._formatDuration(end.difference(now));
+        details = 'Saúde $health/100 · Colheita em $remaining';
+      }
       progress = plot.progress(now);
     } else if (!plot.tilled) {
       label = 'Use a enxada para preparar';
@@ -2412,6 +2572,7 @@ class _PlotNotice extends StatelessWidget {
           : 'Terra seca · regue antes de plantar';
     }
     return _FarmPanel(
+      translucent: true,
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 7),
         child: Column(
@@ -2421,7 +2582,9 @@ class _PlotNotice extends StatelessWidget {
                 textAlign: TextAlign.center,
                 style: const TextStyle(fontSize: 12)),
             if (details != null)
-              Text(details, style: const TextStyle(fontSize: 11)),
+              Text(details,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 11)),
             if (planting) ...[
               const SizedBox(height: 5),
               TweenAnimationBuilder<double>(
