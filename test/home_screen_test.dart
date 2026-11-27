@@ -167,16 +167,16 @@ void main() {
     await tester.tap(find.byTooltip('Colher'));
     await tester.tap(tile);
     await tester.pump();
-    expect(find.text('12/100 XP'), findsOneWidget);
+    expect(find.text('8/100 XP'), findsOneWidget);
     expect(player.coins, 10);
     await tester.tap(find.byTooltip('Armazém 1'));
     await tester.pumpAndSettle();
     expect(find.text('Quantidade: 1'), findsOneWidget);
     await tester.tap(find.text('Vender'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Vender por 12'));
+    await tester.tap(find.text('Vender por 8'));
     await tester.pumpAndSettle();
-    expect(player.coins, 22);
+    expect(player.coins, 18);
     expect(player.basketCount, 0);
     await tester.tap(find.text('Fechar'));
     await tester.pumpAndSettle();
@@ -231,14 +231,14 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Aumentar quantidade para vender'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Vender por 140'));
+    await tester.tap(find.text('Vender por 80'));
     await tester.pumpAndSettle();
     expect(player.basket[CropType.cenoura], 1);
-    expect(player.coins, 155);
-    await tester.tap(find.text('Vender tudo por 70'));
+    expect(player.coins, 95);
+    await tester.tap(find.text('Vender tudo por 40'));
     await tester.pumpAndSettle();
     expect(player.basket, isEmpty);
-    expect(player.coins, 225);
+    expect(player.coins, 135);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
@@ -281,11 +281,11 @@ void main() {
         find.textContaining('Venda as mercadorias do Armazém'), findsOneWidget);
     await tester.tap(find.text('Abrir Armazém'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Vender tudo por 24'));
+    await tester.tap(find.text('Vender tudo por 16'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Fechar'));
     await tester.pumpAndSettle();
-    expect(find.text('Saldo: 24 moedas'), findsOneWidget);
+    expect(find.text('Saldo: 16 moedas'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox.shrink());
   });
