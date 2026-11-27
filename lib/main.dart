@@ -972,15 +972,17 @@ class NewPlotTile extends StatelessWidget {
             painter: NewPlotPainter(enabled: enabled),
             child: Center(
               child: FractionallySizedBox(
-                widthFactor: .56,
-                heightFactor: .66,
+                // Keep the full emblem inside the inset diamond, even
+                // when the price grows or text scaling is enabled.
+                widthFactor: .40,
+                heightFactor: .43,
                 child: FittedBox(
                   fit: BoxFit.scaleDown,
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(Icons.lock_rounded,
-                          size: 12,
+                          size: 10,
                           color: enabled
                               ? const Color(0xffffd883)
                               : const Color(0xffe3dbbe)),
