@@ -1794,7 +1794,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         const SizedBox(width: 12),
                         Tooltip(
                           message: 'Canteiros cultiváveis',
-                          child: Text('🌱 ${player.plots.length}'),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.grass,
+                                  size: 16, color: Color(0xff9cda67)),
+                              Text(' ${player.plots.length}'),
+                            ],
+                          ),
                         ),
                       ],
                     ],
