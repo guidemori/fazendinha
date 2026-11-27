@@ -145,6 +145,16 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  test('o preço do canteiro sobe a cada desbloqueio', () {
+    final player = Player.initial()..coins = 475;
+    for (final cost in [100, 150, 225]) {
+      expect(player.nextPlotCost, cost);
+      expect(player.buyPlot(), isTrue);
+    }
+    expect(player.coins, 0);
+    expect(player.nextPlotCost, 338);
+  });
+
   testWidgets('compra em lote é limitada pelo saldo e mantém a loja aberta',
       (tester) async {
     final player = Player.initial()..coins = 25;

@@ -938,7 +938,7 @@ class PlotWidget extends StatelessWidget {
 // [ui/widgets/new_plot_tile.dart]  Losango do canteiro expansível
 // ------------------------------------------------------------
 
-/// Losango tracejado que representa o próximo canteiro comprável.
+/// Área bloqueada que mostra o custo do próximo canteiro.
 class NewPlotTile extends StatelessWidget {
   const NewPlotTile({
     super.key,
@@ -963,36 +963,33 @@ class NewPlotTile extends StatelessWidget {
           onTap: onTap,
           child: CustomPaint(
             painter: NewPlotPainter(enabled: enabled),
-            child: FractionallySizedBox(
-              widthFactor: .72,
-              heightFactor: .65,
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'Novo canteiro',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                        color: enabled
-                            ? const Color(0xFF2E4E1E)
-                            : const Color(0xFF6E6E6E),
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '🪙 $cost',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                        color: enabled
-                            ? const Color(0xFF2E4E1E)
-                            : const Color(0xFF6E6E6E),
-                      ),
-                    ),
-                  ],
+            child: Center(
+              child: FractionallySizedBox(
+                widthFactor: .67,
+                heightFactor: .44,
+                child: FittedBox(
+                  child: Row(
+                    children: [
+                      Icon(Icons.lock_rounded,
+                          size: 19,
+                          color: enabled
+                              ? const Color(0xffffd883)
+                              : const Color(0xffe3dbbe)),
+                      const SizedBox(width: 4),
+                      Image.asset(_farmIcon('coin'),
+                          width: 13, height: 13, excludeFromSemantics: true),
+                      const SizedBox(width: 2),
+                      Text('$cost',
+                          style: const TextStyle(
+                            color: Color(0xfffff4d5),
+                            fontWeight: FontWeight.w800,
+                            fontSize: 15,
+                            shadows: [
+                              Shadow(color: Color(0xff172315), blurRadius: 3)
+                            ],
+                          )),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -1020,27 +1017,35 @@ class NewPlotPainter extends CustomPainter {
       rect,
       Paint()
         ..shader = LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
           colors: enabled
-              ? const [Color(0xFFB9D67E), Color(0xFF7EA652)]
-              : const [Color(0xFF9C9C9C), Color(0xFF6E6E6E)],
+              ? const [Color(0xff708544), Color(0xff344527)]
+              : const [Color(0xff566346), Color(0xff2c3929)],
         ).createShader(rect),
     );
 
-    // Bordadura interna tracejada sugerindo o contorno do futuro canteiro.
-    final inner = Path()
-      ..moveTo(size.width / 2, size.height * 0.16)
-      ..lineTo(size.width * 0.84, size.height / 2)
-      ..lineTo(size.width / 2, size.height * 0.84)
-      ..lineTo(size.width * 0.16, size.height / 2)
-      ..close();
+    final random = math.Random(19);
+    final fleck = Paint()..color = const Color(0x32e4d6a0);
+    for (var i = 0; i < 65; i++) {
+      canvas.drawOval(
+        Rect.fromLTWH(
+            random.nextDouble() * size.width,
+            random.nextDouble() * size.height,
+            size.width * .023,
+            size.height * .025),
+        fleck,
+      );
+    }
+
+    final inner = isoDiamondPath(Size(size.width * .88, size.height * .80))
+        .shift(Offset(size.width * .06, size.height * .10));
     canvas.drawPath(
       inner,
       Paint()
-        ..color = enabled ? const Color(0xFF4E7A2A) : const Color(0xFF5A5A5A)
+        ..color = enabled ? const Color(0xaff2cb73) : const Color(0x70c5c199)
         ..style = PaintingStyle.stroke
-        ..strokeWidth = math.max(1.5, size.width * 0.03),
+        ..strokeWidth = size.width * .012,
     );
     canvas.restore();
 
@@ -1049,7 +1054,7 @@ class NewPlotPainter extends CustomPainter {
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = math.max(1.5, size.width * 0.035)
-        ..color = enabled ? const Color(0xFF3E5C2A) : const Color(0xFF555555),
+        ..color = enabled ? const Color(0xff394223) : const Color(0xff32392a),
     );
   }
 
