@@ -64,17 +64,18 @@ class _CropContactShadow extends CustomPainter {
 }
 
 class _CropSoilRim extends CustomPainter {
-  const _CropSoilRim(this.stage);
+  const _CropSoilRim(this.stage, {required this.inset});
 
   final int stage;
+  final bool inset;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height * .59);
+    final center = Offset(size.width / 2, size.height * (inset ? .64 : .59));
     final clod = Paint();
     final scale = size.width / 76;
     for (var i = -2; i <= 2; i++) {
-      final x = i * (1.1 + stage * .42) * scale;
+      final x = i * (1.1 + stage * (inset ? .65 : .42)) * scale;
       final y = (1 - i.abs() * .42) * scale;
       final rect = Rect.fromCenter(
         center: center + Offset(x, y),
@@ -90,5 +91,6 @@ class _CropSoilRim extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_CropSoilRim oldDelegate) => stage != oldDelegate.stage;
+  bool shouldRepaint(_CropSoilRim oldDelegate) =>
+      stage != oldDelegate.stage || inset != oldDelegate.inset;
 }

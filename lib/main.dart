@@ -724,11 +724,31 @@ class PlotPainter extends CustomPainter {
                 : const [Color(0xffaa8c5e), Color(0xff775b3d)];
     canvas.drawRect(
       rect,
+      Paint()..color = colors.last,
+    );
+
+    final w = size.width;
+    final h = size.height;
+    final mound = Path()
+      ..moveTo(w * .025, h * .50)
+      ..quadraticBezierTo(w * .24, h * .24, w * .50, h * .02)
+      ..quadraticBezierTo(w * .76, h * .19, w * .975, h * .50)
+      ..quadraticBezierTo(w * .74, h * .68, w * .50, h * .82)
+      ..quadraticBezierTo(w * .26, h * .70, w * .025, h * .50)
+      ..close();
+    final crown = Color.lerp(
+      colors.first,
+      const Color(0xffd2a677),
+      wet ? .24 : .39,
+    )!;
+    canvas.drawPath(
+      mound,
       Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: colors,
+        ..shader = RadialGradient(
+          center: const Alignment(-.25, -.23),
+          radius: .67,
+          colors: [crown, colors.first, colors.last],
+          stops: const [0, .52, 1],
         ).createShader(rect),
     );
 
@@ -855,7 +875,9 @@ class PlotWidget extends StatelessWidget {
                     children: [
                       Positioned(
                         left: (constraints.maxWidth - size) / 2,
-                        bottom: constraints.maxHeight * .43 - size / 16,
+                        bottom: constraints.maxHeight *
+                                (type == CropType.alface ? .34 : .43) -
+                            size / 16,
                         width: size,
                         height: size,
                         child: Image.asset(
@@ -873,7 +895,12 @@ class PlotWidget extends StatelessWidget {
             ),
           if (stage > 0)
             IgnorePointer(
-              child: CustomPaint(painter: _CropSoilRim(stage)),
+              child: CustomPaint(
+                painter: _CropSoilRim(
+                  stage,
+                  inset: plot.plantedCrop == CropType.alface,
+                ),
+              ),
             ),
           ClipPath(
             clipper: const IsoDiamondClipper(),
