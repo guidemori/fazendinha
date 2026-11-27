@@ -967,6 +967,7 @@ class NewPlotTile extends StatelessWidget {
         clipper: const IsoDiamondClipper(),
         clipBehavior: Clip.hardEdge,
         child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
           onTap: onTap,
           child: CustomPaint(
             painter: NewPlotPainter(enabled: enabled),
@@ -2486,17 +2487,30 @@ class _FarmSceneState extends State<_FarmScene> {
 
         final focus = player.plots
             .indexWhere((plot) => identical(plot, scene.focusedPlot));
-        void inspectAt(Offset p) {
+        Plot? plotAt(Offset position, {double edgeTolerance = 0}) {
+          Plot? closestPlot;
+          // Convert the perpendicular screen distance into diamond coordinates.
+          var nearest =
+              1 + edgeTolerance * (Offset(2 / tileW, 2 / tileH)).distance;
           for (var i = player.plots.length - 1; i >= 0; i--) {
-            final dx = (p.dx - leftFor(i) - tileW / 2).abs() / (tileW / 2);
-            final dy = (p.dy - topFor(i) - tileH / 2).abs() / (tileH / 2);
-            if (dx + dy <= 1) {
-              scene.onInspect?.call(player.plots[i]);
-              return;
+            final dx = (position.dx - leftFor(i) - tileW / 2).abs();
+            final dy = (position.dy - topFor(i) - tileH / 2).abs();
+            final distance = dx / (tileW / 2) + dy / (tileH / 2);
+            if (distance > nearest ||
+                (closestPlot != null && distance == nearest)) {
+              continue;
             }
+            nearest = distance;
+            closestPlot = player.plots[i];
           }
-          scene.onInspect?.call(null);
+          return closestPlot;
         }
+
+        void inspectAt(Offset position) =>
+            scene.onInspect?.call(plotAt(position));
+
+        final acceptsEdgeTap =
+            scene.tool == _FarmTool.hoe || scene.tool == _FarmTool.water;
 
         return MouseRegion(
           cursor: SystemMouseCursors.none,
@@ -2524,6 +2538,17 @@ class _FarmSceneState extends State<_FarmScene> {
                     child: Image.asset('assets/images/farm.webp',
                         fit: BoxFit.cover),
                   ),
+                  if (acceptsEdgeTap)
+                    GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      excludeFromSemantics: true,
+                      // Drawn below the tiles so precise hits take priority.
+                      onTapUp: (details) {
+                        final plot =
+                            plotAt(details.localPosition, edgeTolerance: 2);
+                        if (plot != null) scene.onPlotTap(plot);
+                      },
+                    ),
                   // Índice crescente = mais perto do observador; desenhado por
                   // último para dar a sobreposição frontal correta.
                   for (var i = 0; i < player.plots.length; i++)

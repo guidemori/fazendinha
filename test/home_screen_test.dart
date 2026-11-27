@@ -8,6 +8,42 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 void main() {
+  testWidgets('enxada e regador aceitam toques nas bordas do canteiro',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(640, 360);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final player = Player.initial();
+    for (final plot in player.plots) {
+      plot.tilled = false;
+    }
+    await tester.pumpWidget(FazendinhaApp(player: player));
+    await tester.pumpAndSettle();
+    final tile = tester.getRect(find.byType(PlotWidget).first);
+    final plot = player.plots.first;
+    final topEdge = Offset(tile.center.dx, tile.top);
+    await tester.tap(find.byTooltip('Enxada'));
+    await tester.pump();
+    await tester.tapAt(topEdge - const Offset(0, 6));
+    expect(plot.tilled, isFalse);
+    await tester.tapAt(topEdge - const Offset(0, 1));
+    await tester.pump();
+    expect(plot.tilled, isTrue);
+    expect(player.plots.skip(1).every((plot) => !plot.tilled), isTrue);
+
+    await tester.tap(find.byTooltip('Regar'));
+    await tester.pump();
+    final diagonal =
+        Offset(tile.left + tile.width / 4, tile.top + tile.height / 4 - 1);
+    await tester.tapAt(diagonal);
+    await tester.pump();
+    expect(plot.wateredAt, isNotNull);
+    expect(
+        player.plots.skip(1).every((plot) => plot.wateredAt == null), isTrue);
+  });
+
   testWidgets('rega, planta, colhe no armazém e vende em paisagem',
       (tester) async {
     tester.view.devicePixelRatio = 1;
