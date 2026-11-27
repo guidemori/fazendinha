@@ -715,55 +715,72 @@ class PlotPainter extends CustomPainter {
     canvas.save();
     canvas.clipPath(path);
 
-    // Terra: mais clara vazia; mais escura quando cultivada.
-    final soil = Paint()
-      ..shader = LinearGradient(
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-        colors: wet
-            ? const [Color(0xff744c36), Color(0xff3e382e)]
-            : !tilled
-                ? const [Color(0xFFAA9467), Color(0xFF7D6B49)]
-                : stage == 0
-                    ? const [Color(0xFFBC8A55), Color(0xFF7A4E2F)]
-                    : const [Color(0xFF9C7040), Color(0xFF5C4026)],
-      ).createShader(rect);
-    canvas.drawRect(rect, soil);
+    final colors = wet
+        ? const [Color(0xff71513a), Color(0xff443224)]
+        : stage > 0
+            ? const [Color(0xff8e653f), Color(0xff563a25)]
+            : tilled
+                ? const [Color(0xffa37a51), Color(0xff65462e)]
+                : const [Color(0xffaa8c5e), Color(0xff775b3d)];
+    canvas.drawRect(
+      rect,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: colors,
+        ).createShader(rect),
+    );
 
-    // Sulcos de plantio seguindo a diagonal maior do losango.
-    final furrow = Paint()
-      ..color = const Color(0xFF6B4A2C)
-      ..strokeWidth = math.max(1.5, size.width * 0.03)
-      ..strokeCap = StrokeCap.round;
-    final ridge = Paint()
-      ..color = const Color(0xFFCDA06A)
-      ..strokeWidth = math.max(1.0, size.width * 0.012)
-      ..strokeCap = StrokeCap.round;
-    for (var r = 1; tilled && r < 4; r++) {
-      final sx = size.width * (0.10 + r * 0.14);
-      final sy = size.height * (0.74 - r * 0.16);
-      final from = Offset(sx, sy);
-      final to = Offset(
-        sx + size.width * 0.38,
-        sy + size.height * 0.38,
+    final random = math.Random(47);
+    final grain = Paint();
+    for (var i = 0; i < 155; i++) {
+      final center = Offset(
+        random.nextDouble() * size.width,
+        random.nextDouble() * size.height,
       );
-      canvas.drawLine(from, to, furrow);
-      canvas.drawLine(
-        from + const Offset(0, -2),
-        to + const Offset(0, -2),
-        ridge,
+      final radius = (.26 + random.nextDouble() * .9) * size.width / 76;
+      final clod = Rect.fromCenter(
+        center: center,
+        width: radius * 2.8,
+        height: radius * 1.45,
+      );
+      canvas.drawOval(clod, grain..color = const Color(0x542e1b11));
+      canvas.drawOval(
+        clod.shift(Offset(-radius * .24, -radius * .4)),
+        grain..color = wet ? const Color(0x537e6041) : const Color(0x62d2a171),
       );
     }
 
+    if (tilled) {
+      // Broken indentations and loose clods give the bed irregular relief.
+      for (var row = 0; row < 3; row++) {
+        for (var section = 0; section < 6; section++) {
+          final t = section / 6;
+          final from = Offset(
+            size.width * (.20 + row * .14 + t * .30),
+            size.height * (.47 - row * .145 + t * .30),
+          );
+          final span = size.width * (.019 + random.nextDouble() * .031);
+          canvas.drawLine(
+            from,
+            from + Offset(span, span * .45 + random.nextDouble() - .5),
+            grain
+              ..color = const Color(0x5239281c)
+              ..strokeWidth = size.width * .015
+              ..strokeCap = StrokeCap.round,
+          );
+        }
+      }
+    }
     canvas.restore();
 
-    // Contorno: dourado quando pronto para colher.
     canvas.drawPath(
       path,
       Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = ready ? size.width * 0.05 : size.width * 0.035
-        ..color = ready ? const Color(0xFFFFD54F) : const Color(0xFF4A3A26),
+        ..strokeWidth = size.width * .024
+        ..color = ready ? const Color(0xffc49a48) : const Color(0xff554029),
     );
   }
 
@@ -838,7 +855,7 @@ class PlotWidget extends StatelessWidget {
                     children: [
                       Positioned(
                         left: (constraints.maxWidth - size) / 2,
-                        bottom: constraints.maxHeight * .50 - size / 16,
+                        bottom: constraints.maxHeight * .43 - size / 16,
                         width: size,
                         height: size,
                         child: Image.asset(
@@ -853,6 +870,10 @@ class PlotWidget extends StatelessWidget {
                   );
                 }),
               ),
+            ),
+          if (stage > 0)
+            IgnorePointer(
+              child: CustomPaint(painter: _CropSoilRim(stage)),
             ),
           ClipPath(
             clipper: const IsoDiamondClipper(),
@@ -1828,64 +1849,66 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ),
                 Align(
                   alignment: Alignment.topRight,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      _shortcut('Armazém', _FarmShortcut.warehouse,
-                          'Armazém ${player.basketCount}', _showWarehouse),
-                      _shortcut('Loja', _FarmShortcut.store,
-                          'Comprar sementes e fertilizantes', _showShop),
-                      _shortcut('Amigos', _FarmShortcut.friends,
-                          'Visitar fazendas de amigos', () {
-                        if (widget.socialClient case final client?) {
-                          showSocialFarm(context, client);
-                        } else {
-                          _showFarmDialog(
-                              'Amigos',
-                              (_) => const Text(
-                                  'O modo social está indisponível nesta versão.'));
-                        }
-                      }),
-                      _shortcut(
-                          'Ranking',
-                          _FarmShortcut.ranking,
-                          'Classificação das fazendas',
-                          () => _showFarmDialog(
-                              'Ranking',
-                              (_) => const Text(
-                                  'A classificação online ainda não está disponível.'))),
-                      _shortcut(
-                          'Avisos',
-                          _FarmShortcut.notices,
-                          'Login diário e melhorias',
-                          () => _showFarmDialog(
-                              'Avisos',
-                              (update) => Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      ListTile(
-                                          leading:
-                                              const Icon(Icons.card_giftcard),
-                                          title: const Text('Login diário'),
-                                          onTap: () {
-                                            Navigator.of(context,
-                                                    rootNavigator: true)
-                                                .pop();
-                                            _showVisits();
-                                          }),
-                                      ListTile(
-                                          leading:
-                                              const Icon(Icons.trending_up),
-                                          title: const Text('Melhorias'),
-                                          onTap: () {
-                                            Navigator.of(context,
-                                                    rootNavigator: true)
-                                                .pop();
-                                            _showUpgrades();
-                                          }),
-                                    ],
-                                  ))),
-                    ],
+                  child: _FarmPanel(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _shortcut('Armazém', _FarmShortcut.warehouse,
+                            'Armazém ${player.basketCount}', _showWarehouse),
+                        _shortcut('Loja', _FarmShortcut.store,
+                            'Comprar sementes e fertilizantes', _showShop),
+                        _shortcut('Amigos', _FarmShortcut.friends,
+                            'Visitar fazendas de amigos', () {
+                          if (widget.socialClient case final client?) {
+                            showSocialFarm(context, client);
+                          } else {
+                            _showFarmDialog(
+                                'Amigos',
+                                (_) => const Text(
+                                    'O modo social está indisponível nesta versão.'));
+                          }
+                        }),
+                        _shortcut(
+                            'Ranking',
+                            _FarmShortcut.ranking,
+                            'Classificação das fazendas',
+                            () => _showFarmDialog(
+                                'Ranking',
+                                (_) => const Text(
+                                    'A classificação online ainda não está disponível.'))),
+                        _shortcut(
+                            'Avisos',
+                            _FarmShortcut.notices,
+                            'Login diário e melhorias',
+                            () => _showFarmDialog(
+                                'Avisos',
+                                (update) => Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        ListTile(
+                                            leading:
+                                                const Icon(Icons.card_giftcard),
+                                            title: const Text('Login diário'),
+                                            onTap: () {
+                                              Navigator.of(context,
+                                                      rootNavigator: true)
+                                                  .pop();
+                                              _showVisits();
+                                            }),
+                                        ListTile(
+                                            leading:
+                                                const Icon(Icons.trending_up),
+                                            title: const Text('Melhorias'),
+                                            onTap: () {
+                                              Navigator.of(context,
+                                                      rootNavigator: true)
+                                                  .pop();
+                                              _showUpgrades();
+                                            }),
+                                      ],
+                                    ))),
+                      ],
+                    ),
                   ),
                 ),
                 Align(
