@@ -876,7 +876,10 @@ class PlotWidget extends StatelessWidget {
             Positioned.fill(
               child: IgnorePointer(
                 child: LayoutBuilder(builder: (context, constraints) {
-                  final size = constraints.maxHeight * (.35 + stage * .20);
+                  // The artwork changes in stages, but its size follows
+                  // the same progress as the harvest countdown.
+                  final size =
+                      constraints.maxHeight * (.55 + plot.progress(now) * .60);
                   final buried = type == CropType.cenoura &&
                       stage == GameConstants.cropStageCount;
                   final sprite = Image.asset(
@@ -889,7 +892,9 @@ class PlotWidget extends StatelessWidget {
                   return Stack(
                     clipBehavior: Clip.none,
                     children: [
-                      Positioned(
+                      AnimatedPositioned(
+                        duration: const Duration(milliseconds: 250),
+                        curve: Curves.easeOut,
                         left: (constraints.maxWidth - size) / 2,
                         bottom: constraints.maxHeight *
                                 (type == CropType.alface ? .34 : .43) -

@@ -8,6 +8,30 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 void main() {
+  testWidgets('adubo aumenta o tomate antes da próxima troca de imagem',
+      (tester) async {
+    final player = Player.initial()..fertilizer = 1;
+    final plot = player.plots.first
+      ..plantedCrop = CropType.tomate
+      ..plantedAt = DateTime.now().subtract(const Duration(minutes: 2))
+      ..growDuration = const Duration(minutes: 15);
+    await tester.pumpWidget(FazendinhaApp(player: player));
+    await tester.pumpAndSettle();
+
+    final tile = find.byType(PlotWidget).first;
+    final tomato = find.descendant(of: tile, matching: find.byType(Image));
+    final originalAsset = tester.widget<Image>(tomato).image;
+    final originalWidth = tester.getSize(tomato).width;
+    await tester.tap(find.byTooltip('Adubo · 1'));
+    await tester.tap(tile);
+    await tester.pumpAndSettle();
+
+    expect(player.fertilizer, 0);
+    expect(plot.growDuration!, lessThan(const Duration(minutes: 15)));
+    expect(tester.widget<Image>(tomato).image, originalAsset);
+    expect(tester.getSize(tomato).width, greaterThan(originalWidth));
+  });
+
   testWidgets('compra adubo direto na loja e atualiza o estoque',
       (tester) async {
     tester.view.devicePixelRatio = 1;
