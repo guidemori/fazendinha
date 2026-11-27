@@ -101,6 +101,37 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets(
+      'a faixa de canteiros avança em direção à barra sem mudar os primeiros',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(640, 360);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final player = Player.initial(plotCount: GameConstants.maxPlots - 1);
+    player.coins = 100000;
+    await tester.pumpWidget(FazendinhaApp(player: player));
+    await tester.pumpAndSettle();
+
+    final plots = find.byType(PlotWidget);
+    final first = tester.getCenter(plots.first);
+    final expansion = find.byType(NewPlotTile);
+    final pending = tester.getRect(expansion);
+    expect(first.dx, lessThan(tester.view.physicalSize.width * .3));
+    expect(pending.center.dx, greaterThan(first.dx));
+    expect(pending.center.dy, greaterThan(first.dy));
+    expect(pending.bottom,
+        lessThan(tester.getTopLeft(find.byTooltip('Colher')).dy));
+
+    await tester.tap(expansion);
+    await tester.pump();
+    expect(tester.getCenter(plots.first), first);
+    expect(tester.getRect(plots.last), pending);
+    expect(expansion, findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('registra e resgata a visita usando a resposta do servidor',
       (tester) async {
     tester.view.physicalSize = const Size(844, 390);

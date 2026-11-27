@@ -53,7 +53,7 @@ class GameConstants {
   /// Curva de custo dos canteiros: custo = base x fator^quantidade.
   static const double newPlotBaseCost = 100.0;
   static const double newPlotGrowthFactor = 1.5;
-  static const int maxPlots = 12;
+  static const int maxPlots = 16;
 
   /// Intervalo de salvamento automático (segundos).
   static const int autoSaveSeconds = 30;
@@ -84,7 +84,7 @@ class GameConstants {
     final col = index % gridColumns;
     final row = index ~/ gridColumns;
     return Offset(
-      (col - row) * isoTileHalfWidth,
+      (row - col) * isoTileHalfWidth,
       (col + row) * isoTileHalfHeight,
     );
   }
@@ -825,6 +825,9 @@ class PlotWidget extends StatelessWidget {
               ),
             ),
           ),
+          if (stage > 0)
+            IgnorePointer(
+                child: CustomPaint(painter: _CropContactShadow(stage))),
           if (plot.plantedCrop case final type? when stage > 0)
             Positioned.fill(
               child: IgnorePointer(
@@ -835,7 +838,7 @@ class PlotWidget extends StatelessWidget {
                     children: [
                       Positioned(
                         left: (constraints.maxWidth - size) / 2,
-                        bottom: constraints.maxHeight * .29,
+                        bottom: constraints.maxHeight * .50 - size / 16,
                         width: size,
                         height: size,
                         child: Image.asset(
@@ -2194,40 +2197,33 @@ class _FarmScene extends StatelessWidget {
         final tileCount =
             player.plots.length + (player.canBuyMorePlots ? 1 : 0);
 
-        // Caixa envolvente dos losangos, no espaço isométrico.
-        var minX = 0.0, maxX = 0.0, minY = 0.0, maxY = 0.0;
-        for (var i = 0; i < tileCount; i++) {
-          final c = GameConstants.plotCenterForIndex(i);
-          minX = math.min(minX, c.dx);
-          maxX = math.max(maxX, c.dx);
-          minY = math.min(minY, c.dy);
-          maxY = math.max(maxY, c.dy);
-        }
-        minX -= GameConstants.isoTileHalfWidth;
-        maxX += GameConstants.isoTileHalfWidth;
-        minY -= GameConstants.isoTileHalfHeight;
-        maxY += GameConstants.isoTileHalfHeight;
-
-        final contentW = math.max(1.0, maxX - minX);
-        final contentH = math.max(1.0, maxY - minY);
-
-        // Escala para caber com folga, preservando o aspecto 2:1 do losango.
-        final scale = math.min(w * .46 / contentW, h * .48 / contentH);
-        final isoCenter = Offset((minX + maxX) / 2, (minY + maxY) / 2);
-        final screenCenter = Offset(w * .41, h * .59);
+        // Reserve the full strip from the start, so expanding never moves
+        // the existing beds. The first row is on the creek side.
+        final origin = Offset(w * .23, h * .35);
+        final last =
+            GameConstants.plotCenterForIndex(GameConstants.maxPlots - 1);
+        final stripWidth = last.dx + GameConstants.isoTileHalfWidth * 2;
+        final stripHeight = last.dy + GameConstants.isoTileHalfHeight;
+        final scale = math.min(
+          math.min(
+            w * .53 / stripWidth,
+            h * .195 / (GameConstants.isoTileHalfWidth * 2),
+          ),
+          math.max(1.0, h - origin.dy - 62) / stripHeight,
+        );
 
         final tileW = GameConstants.isoTileHalfWidth * 2 * scale;
         final tileH = GameConstants.isoTileHalfHeight * 2 * scale;
 
-        double leftFor(int i) {
-          final c = GameConstants.plotCenterForIndex(i);
-          return screenCenter.dx + (c.dx - isoCenter.dx) * scale - tileW / 2;
-        }
+        double leftFor(int i) =>
+            origin.dx +
+            GameConstants.plotCenterForIndex(i).dx * scale -
+            tileW / 2;
 
-        double topFor(int i) {
-          final c = GameConstants.plotCenterForIndex(i);
-          return screenCenter.dy + (c.dy - isoCenter.dy) * scale - tileH / 2;
-        }
+        double topFor(int i) =>
+            origin.dy +
+            GameConstants.plotCenterForIndex(i).dy * scale -
+            tileH / 2;
 
         final focus =
             player.plots.indexWhere((plot) => identical(plot, focusedPlot));

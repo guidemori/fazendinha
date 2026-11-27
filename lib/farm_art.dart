@@ -35,3 +35,30 @@ class _CropArtwork extends StatelessWidget {
     );
   }
 }
+
+class _CropContactShadow extends CustomPainter {
+  const _CropContactShadow(this.stage);
+
+  final int stage;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final shadow = Rect.fromCenter(
+      center: Offset(size.width / 2, size.height * .50),
+      width: size.width * (.09 + stage * .055),
+      height: size.height * (.07 + stage * .022),
+    );
+    canvas.drawOval(
+      shadow,
+      Paint()
+        ..shader = const RadialGradient(
+          colors: [Color(0xaa262317), Color(0x00262317)],
+          stops: [.24, 1],
+        ).createShader(shadow),
+    );
+  }
+
+  @override
+  bool shouldRepaint(_CropContactShadow oldDelegate) =>
+      stage != oldDelegate.stage;
+}
