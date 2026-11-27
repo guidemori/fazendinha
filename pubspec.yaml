@@ -25,6 +25,8 @@ flutter:
   uses-material-design: true
   assets:
     - assets/images/farm.webp
+    - assets/images/farm_sprites/crops/
+    - assets/images/farm_sprites/icons/
   fonts:
     - family: FarmRoboto
       fonts:

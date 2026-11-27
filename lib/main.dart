@@ -697,13 +697,11 @@ class IsoDiamondClipper extends CustomClipper<Path> {
 /// (0 = vazio; 1..3 = crescendo; [GameConstants.cropStageCount] = pronta).
 class PlotPainter extends CustomPainter {
   PlotPainter(
-      {required this.crop,
-      required this.stage,
+      {required this.stage,
       required this.ready,
       required this.tilled,
       required this.wet});
 
-  final CropType? crop;
   final int stage;
   final bool ready;
   final bool tilled;
@@ -767,15 +765,10 @@ class PlotPainter extends CustomPainter {
         ..strokeWidth = ready ? size.width * 0.05 : size.width * 0.035
         ..color = ready ? const Color(0xFFFFD54F) : const Color(0xFF4A3A26),
     );
-    if (crop case final type? when stage > 0) {
-      _paintCropArt(canvas, Offset(size.width / 2, size.height * .51),
-          size.shortestSide * (.45 + stage * .14), type, stage);
-    }
   }
 
   @override
   bool shouldRepaint(PlotPainter oldDelegate) =>
-      crop != oldDelegate.crop ||
       stage != oldDelegate.stage ||
       ready != oldDelegate.ready ||
       tilled != oldDelegate.tilled ||
@@ -825,7 +818,6 @@ class PlotWidget extends StatelessWidget {
           IgnorePointer(
             child: CustomPaint(
               painter: PlotPainter(
-                crop: plot.plantedCrop,
                 stage: stage,
                 ready: ready,
                 tilled: plot.tilled,
@@ -833,6 +825,32 @@ class PlotWidget extends StatelessWidget {
               ),
             ),
           ),
+          if (plot.plantedCrop case final type? when stage > 0)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: LayoutBuilder(builder: (context, constraints) {
+                  final size = constraints.maxHeight * (.35 + stage * .20);
+                  return Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Positioned(
+                        left: (constraints.maxWidth - size) / 2,
+                        bottom: constraints.maxHeight * .29,
+                        width: size,
+                        height: size,
+                        child: Image.asset(
+                          _cropSprite(type, stage),
+                          fit: BoxFit.contain,
+                          alignment: Alignment.bottomCenter,
+                          gaplessPlayback: true,
+                          excludeFromSemantics: true,
+                        ),
+                      ),
+                    ],
+                  );
+                }),
+              ),
+            ),
           ClipPath(
             clipper: const IsoDiamondClipper(),
             child: GestureDetector(
@@ -1698,7 +1716,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       ),
       onPressed: onPressed ?? () => _selectTool(tool),
       icon: SizedBox.square(
-          dimension: 36, child: CustomPaint(painter: _ToolArt(tool))),
+          dimension: 38,
+          child: Image.asset(_farmIcon(tool.name), excludeFromSemantics: true)),
     );
   }
 
@@ -1719,8 +1738,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 SizedBox.square(
-                  dimension: 33,
-                  child: CustomPaint(painter: _ShortcutArt(illustration)),
+                  dimension: 34,
+                  child: Image.asset(_farmIcon(illustration.name),
+                      excludeFromSemantics: true),
                 ),
                 Text(label,
                     maxLines: 1,
@@ -1772,21 +1792,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Tooltip(
+                      Tooltip(
                         message: 'Perfil da fazenda',
                         child: CircleAvatar(
                           radius: 16,
-                          backgroundColor: Color(0xff456d42),
-                          child: Icon(Icons.eco,
-                              color: Color(0xffcef291), size: 20),
+                          backgroundColor: const Color(0xff456d42),
+                          child: Image.asset(_farmIcon('sprout'),
+                              width: 24,
+                              height: 24,
+                              excludeFromSemantics: true),
                         ),
                       ),
                       _LevelStatus(player: player),
                       Tooltip(
                         message: 'Moedas disponíveis',
                         child: Row(mainAxisSize: MainAxisSize.min, children: [
-                          const Icon(Icons.monetization_on,
-                              color: Color(0xffffd167), size: 20),
+                          Image.asset(_farmIcon('coin'),
+                              width: 21,
+                              height: 21,
+                              excludeFromSemantics: true),
                           Text(' ${player.coins}'),
                         ]),
                       ),
@@ -1797,8 +1821,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Icon(Icons.grass,
-                                  size: 16, color: Color(0xff9cda67)),
+                              Image.asset(_farmIcon('sprout'),
+                                  width: 20,
+                                  height: 20,
+                                  excludeFromSemantics: true),
                               Text(' ${player.plots.length}'),
                             ],
                           ),
