@@ -972,29 +972,34 @@ class NewPlotTile extends StatelessWidget {
             painter: NewPlotPainter(enabled: enabled),
             child: Center(
               child: FractionallySizedBox(
-                widthFactor: .67,
-                heightFactor: .44,
+                widthFactor: .56,
+                heightFactor: .66,
                 child: FittedBox(
-                  child: Row(
+                  fit: BoxFit.scaleDown,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(Icons.lock_rounded,
-                          size: 19,
+                          size: 12,
                           color: enabled
                               ? const Color(0xffffd883)
                               : const Color(0xffe3dbbe)),
-                      const SizedBox(width: 4),
-                      Image.asset(_farmIcon('coin'),
-                          width: 13, height: 13, excludeFromSemantics: true),
-                      const SizedBox(width: 2),
-                      Text('$cost',
-                          style: const TextStyle(
-                            color: Color(0xfffff4d5),
-                            fontWeight: FontWeight.w800,
-                            fontSize: 15,
-                            shadows: [
-                              Shadow(color: Color(0xff172315), blurRadius: 3)
-                            ],
-                          )),
+                      const SizedBox(height: 1),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Image.asset(_farmIcon('coin'),
+                              width: 8, height: 8, excludeFromSemantics: true),
+                          const SizedBox(width: 2),
+                          Text('$cost',
+                              style: const TextStyle(
+                                color: Color(0xfffff4d5),
+                                fontWeight: FontWeight.w700,
+                                fontSize: 10,
+                                height: 1,
+                              )),
+                        ],
+                      ),
                     ],
                   ),
                 ),
