@@ -98,6 +98,8 @@ void main() {
     await tester.tap(find.byTooltip('Armazém 1'));
     await tester.pumpAndSettle();
     expect(find.text('Quantidade: 1'), findsOneWidget);
+    await tester.tap(find.text('Vender'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Vender por 12'));
     await tester.pumpAndSettle();
     expect(player.coins, 22);
@@ -142,6 +144,27 @@ void main() {
     expect(tester.getCenter(plots.first), first);
     expect(tester.getRect(plots.last), pending);
     expect(expansion, findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('vende parte de uma cultura e depois vende o restante',
+      (tester) async {
+    final player = Player.initial()..basket[CropType.cenoura] = 3;
+    await tester.pumpWidget(FazendinhaApp(player: player));
+    await tester.tap(find.text('Armazém'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Vender'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Aumentar quantidade para vender'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Vender por 140'));
+    await tester.pumpAndSettle();
+    expect(player.basket[CropType.cenoura], 1);
+    expect(player.coins, 155);
+    await tester.tap(find.text('Vender tudo por 70'));
+    await tester.pumpAndSettle();
+    expect(player.basket, isEmpty);
+    expect(player.coins, 225);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 

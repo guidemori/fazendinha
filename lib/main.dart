@@ -475,8 +475,15 @@ class Player {
     return true;
   }
 
-  int sellCrop(CropType type) {
-    final amount = basket.remove(type) ?? 0;
+  int sellCrop(CropType type, {int? quantity}) {
+    final stock = basket[type] ?? 0;
+    final amount = quantity ?? stock;
+    if (amount <= 0 || amount > stock) return 0;
+    if (amount == stock) {
+      basket.remove(type);
+    } else {
+      basket[type] = stock - amount;
+    }
     final proceeds = amount * effectiveSellValue(Crops.of(type));
     coins += proceeds;
     return proceeds;
@@ -1695,39 +1702,78 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<void> _showWarehouse() {
     final player = widget.player;
+    CropType? selected;
+    var quantity = 1;
     return _showFarmDialog(
-        'Armazém',
-        (update) => Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (player.basket.isEmpty)
-                  const Text('A colheita ainda está vazia.'),
-                for (final entry in player.basket.entries)
-                  ListTile(
-                    leading: _CropArtwork(type: entry.key),
-                    title: Text(entry.key.label),
-                    subtitle: Text('Quantidade: ${entry.value}'),
-                    trailing: TextButton(
-                      onPressed: () {
-                        player.sellCrop(entry.key);
-                        _farmChanged();
-                        update(() {});
-                      },
-                      child: Text(
-                          'Vender por ${entry.value * player.effectiveSellValue(Crops.of(entry.key))}'),
-                    ),
+      'Armazém',
+      (update) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (player.basket.isEmpty) const Text('A colheita ainda está vazia.'),
+          for (final entry in player.basket.entries) ...[
+            ListTile(
+              leading: _CropArtwork(type: entry.key),
+              title: Text(entry.key.label),
+              subtitle: Text('Quantidade: ${entry.value}'),
+              trailing: TextButton(
+                onPressed: () => update(() {
+                  selected = entry.key;
+                  quantity = 1;
+                }),
+                child: const Text('Vender'),
+              ),
+            ),
+            if (selected == entry.key)
+              Wrap(
+                spacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  IconButton(
+                    tooltip: 'Diminuir quantidade para vender',
+                    onPressed:
+                        quantity > 1 ? () => update(() => quantity--) : null,
+                    icon: const Icon(Icons.remove),
                   ),
-                if (player.basket.isNotEmpty)
+                  Text('$quantity / ${entry.value}'),
+                  IconButton(
+                    tooltip: 'Aumentar quantidade para vender',
+                    onPressed: quantity < entry.value
+                        ? () => update(() => quantity++)
+                        : null,
+                    icon: const Icon(Icons.add),
+                  ),
                   FilledButton(
                     onPressed: () {
-                      player.sellBasket();
-                      _farmChanged();
-                      update(() {});
+                      if (player.sellCrop(entry.key, quantity: quantity) > 0) {
+                        _farmChanged();
+                        update(() {
+                          selected = null;
+                          quantity = 1;
+                        });
+                      }
                     },
-                    child: Text('Vender tudo por ${player.basketValue}'),
+                    child: Text(
+                      'Vender por ${quantity * player.effectiveSellValue(Crops.of(entry.key))}',
+                    ),
                   ),
-              ],
-            ));
+                ],
+              ),
+          ],
+          if (player.basket.isNotEmpty)
+            FilledButton(
+              onPressed: () {
+                player.sellBasket();
+                _farmChanged();
+                update(() {
+                  selected = null;
+                  quantity = 1;
+                });
+              },
+              child: Text('Vender tudo por ${player.basketValue}'),
+            ),
+        ],
+      ),
+    );
   }
 
   void _showVisits() {
