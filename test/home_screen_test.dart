@@ -8,29 +8,40 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 void main() {
-  testWidgets('adubo aumenta o tomate antes da próxima troca de imagem',
-      (tester) async {
-    final player = Player.initial()..fertilizer = 1;
-    final plot = player.plots.first
-      ..plantedCrop = CropType.tomate
-      ..plantedAt = DateTime.now().subtract(const Duration(minutes: 2))
-      ..growDuration = const Duration(minutes: 15);
-    await tester.pumpWidget(FazendinhaApp(player: player));
-    await tester.pumpAndSettle();
+  for (final type in CropType.values) {
+    testWidgets('adubo acelera o visual de ${type.label} durante o crescimento',
+        (tester) async {
+      final player = Player.initial()..fertilizer = 1;
+      final duration = Crops.of(type).growTime;
+      final plot = player.plots.first
+        ..plantedCrop = type
+        ..plantedAt = DateTime.now().subtract(duration ~/ 8)
+        ..growDuration = duration;
+      await tester.pumpWidget(FazendinhaApp(player: player));
+      await tester.pumpAndSettle();
 
-    final tile = find.byType(PlotWidget).first;
-    final tomato = find.descendant(of: tile, matching: find.byType(Image));
-    final originalAsset = tester.widget<Image>(tomato).image;
-    final originalWidth = tester.getSize(tomato).width;
-    await tester.tap(find.byTooltip('Adubo · 1'));
-    await tester.tap(tile);
-    await tester.pumpAndSettle();
+      final tile = find.byType(PlotWidget).first;
+      final cropImage = find.descendant(of: tile, matching: find.byType(Image));
+      final originalAsset = tester.widget<Image>(cropImage).image;
+      final originalWidth = tester.getSize(cropImage).width;
+      await tester.tap(find.byTooltip('Adubo · 1'));
+      await tester.tap(tile);
+      await tester.pumpAndSettle();
 
-    expect(player.fertilizer, 0);
-    expect(plot.growDuration!, lessThan(const Duration(minutes: 15)));
-    expect(tester.widget<Image>(tomato).image, originalAsset);
-    expect(tester.getSize(tomato).width, greaterThan(originalWidth));
-  });
+      expect(player.fertilizer, 0);
+      expect(plot.growDuration!, lessThan(duration));
+      expect(tester.widget<Image>(cropImage).image, originalAsset);
+      expect(tester.getSize(cropImage).width, greaterThan(originalWidth));
+
+      plot.plantedAt = DateTime.now().subtract(plot.growDuration!);
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+      expect(plot.stage(DateTime.now()), GameConstants.cropStageCount);
+      final matureAsset = tester.widget<Image>(cropImage).image as AssetImage;
+      expect(matureAsset.assetName, endsWith('/${type.name}_4.webp'));
+      expect(find.text('${type.label} pronta para colher'), findsOneWidget);
+    });
+  }
 
   testWidgets('compra adubo direto na loja e atualiza o estoque',
       (tester) async {
