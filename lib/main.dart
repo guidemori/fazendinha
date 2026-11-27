@@ -1792,17 +1792,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Tooltip(
-                        message: 'Perfil da fazenda',
-                        child: CircleAvatar(
-                          radius: 16,
-                          backgroundColor: const Color(0xff456d42),
-                          child: Image.asset(_farmIcon('sprout'),
-                              width: 24,
-                              height: 24,
-                              excludeFromSemantics: true),
-                        ),
-                      ),
+                      _FarmProfileAvatar(client: widget.socialClient),
                       _LevelStatus(player: player),
                       Tooltip(
                         message: 'Moedas disponíveis',
@@ -2071,6 +2061,51 @@ class _FarmPanel extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _FarmProfileAvatar extends StatelessWidget {
+  const _FarmProfileAvatar({required this.client});
+
+  final SupabaseClient? client;
+
+  @override
+  Widget build(BuildContext context) {
+    final auth = client?.auth;
+    return StreamBuilder<AuthState>(
+      stream: auth?.onAuthStateChange,
+      builder: (context, _) {
+        final metadata = auth?.currentUser?.userMetadata;
+        final fallback = const Icon(
+          Icons.person_rounded,
+          color: Color(0xffe2ead1),
+          size: 22,
+        );
+        final rawPhoto = metadata?['avatar_url'] ?? metadata?['picture'];
+        final photo = rawPhoto is String ? Uri.tryParse(rawPhoto) : null;
+        final hasPhoto =
+            photo != null && photo.scheme == 'https' && photo.host.isNotEmpty;
+        return Tooltip(
+          message: 'Foto do jogador',
+          child: CircleAvatar(
+            radius: 16,
+            backgroundColor: const Color(0xff456d42),
+            child: hasPhoto
+                ? ClipOval(
+                    child: Image.network(
+                      photo.toString(),
+                      width: 32,
+                      height: 32,
+                      fit: BoxFit.cover,
+                      excludeFromSemantics: true,
+                      errorBuilder: (_, __, ___) => fallback,
+                    ),
+                  )
+                : fallback,
+          ),
+        );
+      },
     );
   }
 }
