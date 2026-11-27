@@ -411,7 +411,7 @@ class Player {
   int growSpeedLevel;
   final Map<CropType, int> basket = {};
   final Map<CropType, int> seeds = {};
-  static const fertilizerCost = 8;
+  static const fertilizerCost = 50;
   int fertilizer = 0;
   int appliedDailyLoginCoins = 0;
   int appliedDailyLoginSeeds = 0;
@@ -1171,11 +1171,11 @@ class _CropSelectorSheetState extends State<CropSelectorSheet> {
             const SizedBox(height: 12),
             ListTile(
               dense: true,
-              leading: Image.asset(_farmIcon('fertilizer'),
+              leading: Image.asset(_farmIcon(_FarmTool.fertilizer.name),
                   width: 32, height: 32, excludeFromSemantics: true),
               title: const Text('Adubo'),
               subtitle: Text(
-                  'Acelera o crescimento em 25% do tempo restante · Estoque: ${player.fertilizer}'),
+                  '−25% do tempo restante · Estoque: ${player.fertilizer}'),
               trailing: FilledButton.tonal(
                 onPressed: player.coins >= Player.fertilizerCost
                     ? widget.onBuyFertilizer

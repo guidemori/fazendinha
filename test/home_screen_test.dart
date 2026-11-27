@@ -15,18 +15,29 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    final player = Player.initial();
+    final player = Player.initial()..coins = 65;
     await tester.pumpWidget(FazendinhaApp(player: player));
     await tester.pumpAndSettle();
+    final toolbarAdubo = find.descendant(
+      of: find.byTooltip('Adubo · 0'),
+      matching: find.byType(Image),
+    );
+    final toolbarAsset = tester.widget<Image>(toolbarAdubo).image;
     await tester.tap(find.text('Loja'));
     await tester.pumpAndSettle();
 
     expect(find.text('Adubo'), findsOneWidget);
-    final buy = find.text('Comprar · 8 moedas');
+    final shopAdubo = find.ancestor(
+      of: find.text('Adubo'),
+      matching: find.byType(ListTile),
+    );
+    expect((tester.widget<ListTile>(shopAdubo).leading! as Image).image,
+        toolbarAsset);
+    final buy = find.text('Comprar · 50 moedas');
     await tester.tap(buy);
     await tester.pumpAndSettle();
     expect(player.fertilizer, 1);
-    expect(player.coins, 7);
+    expect(player.coins, 15);
     expect(find.textContaining('Estoque: 1'), findsOneWidget);
 
     await tester.tap(buy);
@@ -380,7 +391,7 @@ void main() {
 
   test('fertilizante reduz o tempo restante e persiste o consumo', () {
     final start = DateTime.utc(2026, 1, 1);
-    final player = Player.initial();
+    final player = Player.initial()..coins = 57;
     final plot = player.plots.first;
     final crop = Crops.of(CropType.alface);
     expect(player.buyFertilizer(), isTrue);
