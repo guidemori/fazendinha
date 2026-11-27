@@ -1055,11 +1055,13 @@ class CropSelectorSheet extends StatefulWidget {
     required this.player,
     required this.onSelected,
     required this.onBuyFertilizer,
+    required this.onOpenWarehouse,
   });
 
   final Player player;
   final void Function(CropType, int quantity) onSelected;
   final VoidCallback onBuyFertilizer;
+  final Future<void> Function() onOpenWarehouse;
 
   @override
   State<CropSelectorSheet> createState() => _CropSelectorSheetState();
@@ -1069,6 +1071,34 @@ class _CropSelectorSheetState extends State<CropSelectorSheet> {
   CropType? _selected;
   int _quantity = 1;
   Player get player => widget.player;
+
+  Future<void> _showInsufficientCoins(int cost) async {
+    final hasGoods = player.basketValue > 0;
+    final openWarehouse = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Moedas insuficientes'),
+        content: Text(
+          'Faltam ${cost - player.coins} moedas.'
+          '${hasGoods ? '\nVenda as mercadorias do Armazém para conseguir moedas.' : ''}',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Voltar'),
+          ),
+          if (hasGoods)
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Abrir Armazém'),
+            ),
+        ],
+      ),
+    );
+    if (!mounted || openWarehouse != true) return;
+    await widget.onOpenWarehouse();
+    if (mounted) setState(() {});
+  }
 
   String _formatDuration(Duration d) {
     if (d.inHours > 0) {
@@ -1116,7 +1146,7 @@ class _CropSelectorSheetState extends State<CropSelectorSheet> {
               trailing: TextButton(
                 onPressed: player.coins >= Player.fertilizerCost
                     ? widget.onBuyFertilizer
-                    : null,
+                    : () => _showInsufficientCoins(Player.fertilizerCost),
                 child: const Text('Comprar por ${Player.fertilizerCost}'),
               ),
             ),
@@ -1207,12 +1237,7 @@ class _CropSelectorSheetState extends State<CropSelectorSheet> {
                           return;
                         }
                         if (!canAfford) {
-                          ScaffoldMessenger.of(context)
-                            ..hideCurrentSnackBar()
-                            ..showSnackBar(SnackBar(
-                              content: Text(
-                                  'Moedas insuficientes! Faltam ${cost - player.coins}.'),
-                            ));
+                          _showInsufficientCoins(cost);
                           return;
                         }
                         setState(() {
@@ -1632,8 +1657,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     });
   }
 
-  void _showFarmDialog(String title, Widget Function(StateSetter) content) {
-    showDialog<void>(
+  Future<void> _showFarmDialog(
+      String title, Widget Function(StateSetter) content) {
+    return showDialog<void>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, update) => AlertDialog(
@@ -1650,9 +1676,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-  void _showWarehouse() {
+  Future<void> _showWarehouse() {
     final player = widget.player;
-    _showFarmDialog(
+    return _showFarmDialog(
         'Armazém',
         (update) => Column(
               mainAxisSize: MainAxisSize.min,
@@ -1780,6 +1806,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       builder: (context) => StatefulBuilder(
         builder: (context, update) => CropSelectorSheet(
           player: widget.player,
+          onOpenWarehouse: _showWarehouse,
           onSelected: (seed, quantity) {
             if (widget.player.buySeed(seed, quantity: quantity)) {
               _farmChanged();

@@ -167,6 +167,19 @@ void main() {
     expect(player.seeds[CropType.alface], 5);
     expect(find.text('Loja de sementes'), findsOneWidget);
     expect(find.text('Saldo: 0 moedas'), findsOneWidget);
+    player.basket[CropType.alface] = 2;
+    await tester.tap(find.text('Alface'));
+    await tester.pumpAndSettle();
+    expect(
+        find.textContaining('Venda as mercadorias do Armazém'), findsOneWidget);
+    await tester.tap(find.text('Abrir Armazém'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Vender tudo por 24'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Fechar'));
+    await tester.pumpAndSettle();
+    expect(find.text('Saldo: 24 moedas'), findsOneWidget);
+
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
