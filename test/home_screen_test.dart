@@ -8,6 +8,33 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 void main() {
+  testWidgets('compra adubo direto na loja e atualiza o estoque',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(640, 360);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final player = Player.initial();
+    await tester.pumpWidget(FazendinhaApp(player: player));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Loja'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Adubo'), findsOneWidget);
+    final buy = find.text('Comprar · 8 moedas');
+    await tester.tap(buy);
+    await tester.pumpAndSettle();
+    expect(player.fertilizer, 1);
+    expect(player.coins, 7);
+    expect(find.textContaining('Estoque: 1'), findsOneWidget);
+
+    await tester.tap(buy);
+    await tester.pumpAndSettle();
+    expect(find.text('Moedas insuficientes'), findsOneWidget);
+    expect(player.fertilizer, 1);
+  });
+
   testWidgets('enxada e regador aceitam toques nas bordas do canteiro',
       (tester) async {
     tester.view.devicePixelRatio = 1;
@@ -74,7 +101,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Comprar por 5 moedas'));
     await tester.pumpAndSettle();
-    expect(find.text('Loja de sementes'), findsOneWidget);
+    expect(find.text('Loja da fazenda'), findsOneWidget);
     await tester.tap(find.byTooltip('Fechar loja'));
     await tester.pumpAndSettle();
     expect(player.coins, 10);
@@ -234,7 +261,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(player.coins, 0);
     expect(player.seeds[CropType.alface], 5);
-    expect(find.text('Loja de sementes'), findsOneWidget);
+    expect(find.text('Loja da fazenda'), findsOneWidget);
     expect(find.text('Saldo: 0 moedas'), findsOneWidget);
     player.basket[CropType.alface] = 2;
     await tester.tap(find.text('Alface'));

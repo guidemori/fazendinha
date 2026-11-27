@@ -1155,7 +1155,7 @@ class _CropSelectorSheetState extends State<CropSelectorSheet> {
             Row(
               children: [
                 const Expanded(
-                  child: Text('Loja de sementes',
+                  child: Text('Loja da fazenda',
                       style:
                           TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                 ),
@@ -1171,15 +1171,16 @@ class _CropSelectorSheetState extends State<CropSelectorSheet> {
             const SizedBox(height: 12),
             ListTile(
               dense: true,
-              leading: const Icon(Icons.science_outlined),
-              title: const Text('Fertilizante'),
+              leading: Image.asset(_farmIcon('fertilizer'),
+                  width: 32, height: 32, excludeFromSemantics: true),
+              title: const Text('Adubo'),
               subtitle: Text(
-                  '−25% do tempo restante · estoque: ${player.fertilizer}'),
-              trailing: TextButton(
+                  'Acelera o crescimento em 25% do tempo restante · Estoque: ${player.fertilizer}'),
+              trailing: FilledButton.tonal(
                 onPressed: player.coins >= Player.fertilizerCost
                     ? widget.onBuyFertilizer
                     : () => _showInsufficientCoins(Player.fertilizerCost),
-                child: const Text('Comprar por ${Player.fertilizerCost}'),
+                child: const Text('Comprar · ${Player.fertilizerCost} moedas'),
               ),
             ),
             Flexible(
