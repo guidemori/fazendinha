@@ -870,6 +870,15 @@ class PlotWidget extends StatelessWidget {
               child: IgnorePointer(
                 child: LayoutBuilder(builder: (context, constraints) {
                   final size = constraints.maxHeight * (.35 + stage * .20);
+                  final buried = type == CropType.cenoura &&
+                      stage == GameConstants.cropStageCount;
+                  final sprite = Image.asset(
+                    _cropSprite(type, stage),
+                    fit: BoxFit.contain,
+                    alignment: Alignment.bottomCenter,
+                    gaplessPlayback: true,
+                    excludeFromSemantics: true,
+                  );
                   return Stack(
                     clipBehavior: Clip.none,
                     children: [
@@ -877,16 +886,19 @@ class PlotWidget extends StatelessWidget {
                         left: (constraints.maxWidth - size) / 2,
                         bottom: constraints.maxHeight *
                                 (type == CropType.alface ? .34 : .43) -
-                            size / 16,
+                            (buried ? 0 : size / 16),
                         width: size,
-                        height: size,
-                        child: Image.asset(
-                          _cropSprite(type, stage),
-                          fit: BoxFit.contain,
-                          alignment: Alignment.bottomCenter,
-                          gaplessPlayback: true,
-                          excludeFromSemantics: true,
-                        ),
+                        height: buried ? size * .64 : size,
+                        child: buried
+                            ? ClipRect(
+                                child: OverflowBox(
+                                  alignment: Alignment.topCenter,
+                                  minHeight: size,
+                                  maxHeight: size,
+                                  child: sprite,
+                                ),
+                              )
+                            : sprite,
                       ),
                     ],
                   );
