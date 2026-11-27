@@ -29,6 +29,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'social_farm.dart';
 import 'visit_rewards.dart';
 
+part 'farm_art.dart';
+
 /// Liga o AdMob apenas em builds Android reais (não na web), usando os IDs
 /// de teste do Google. Nos testes, rode com --dart-define=ENABLE_TEST_ADS=false
 /// para evitar a MissingPluginException do plugin de anúncios.
@@ -575,7 +577,7 @@ class Player {
     return true;
   }
 
-  bool plant(Plot plot, Crop crop, DateTime now) {
+  bool plant(Plot plot, Crop crop, DateTime now, {bool prepared = false}) {
     if (plot.isPlanted || !plot.tilled || !plot.isWet(now)) return false;
     final stock = seeds[crop.type] ?? 0;
     if (!isUnlocked(crop.type) || stock == 0) return false;
@@ -585,7 +587,7 @@ class Player {
       seeds[crop.type] = stock - 1;
     }
     plot.plantedCrop = crop.type;
-    plot.plantedAt = now.add(Plot.plantingDuration);
+    plot.plantedAt = prepared ? now : now.add(Plot.plantingDuration);
     plot.growDuration = effectiveGrowTime(crop);
     plot.wateredAt = null;
     return true;
@@ -695,11 +697,13 @@ class IsoDiamondClipper extends CustomClipper<Path> {
 /// (0 = vazio; 1..3 = crescendo; [GameConstants.cropStageCount] = pronta).
 class PlotPainter extends CustomPainter {
   PlotPainter(
-      {required this.stage,
+      {required this.crop,
+      required this.stage,
       required this.ready,
       required this.tilled,
       required this.wet});
 
+  final CropType? crop;
   final int stage;
   final bool ready;
   final bool tilled;
@@ -753,7 +757,6 @@ class PlotPainter extends CustomPainter {
       );
     }
 
-    _paintCrop(canvas, size);
     canvas.restore();
 
     // Contorno: dourado quando pronto para colher.
@@ -764,53 +767,15 @@ class PlotPainter extends CustomPainter {
         ..strokeWidth = ready ? size.width * 0.05 : size.width * 0.035
         ..color = ready ? const Color(0xFFFFD54F) : const Color(0xFF4A3A26),
     );
-  }
-
-  void _paintCrop(Canvas canvas, Size size) {
-    if (stage == 0) return;
-    final center = Offset(size.width / 2, size.height * 0.40);
-    final baseR = size.width * (0.06 + stage * 0.035);
-    final leafCount = 4 + stage * 2;
-    final leaf = Paint()..color = _stageColor(stage);
-
-    for (var i = 0; i < leafCount; i++) {
-      final angle = (i / leafCount) * 2 * math.pi;
-      final r = baseR * (i.isEven ? 1.05 : 0.78);
-      final leafCenter = center +
-          Offset(
-            math.cos(angle) * r * 0.55,
-            math.sin(angle) * r * 0.55,
-          );
-      canvas.drawCircle(leafCenter, r, leaf);
-    }
-    canvas.drawCircle(
-      center,
-      baseR * 0.62,
-      Paint()..color = const Color(0xFFA5D65A),
-    );
-
-    // Brilho indicando pronta para colher.
-    if (stage == GameConstants.cropStageCount) {
-      canvas.drawCircle(
-        center,
-        baseR * 1.2,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 2
-          ..color = const Color(0xFFFFF9C4),
-      );
+    if (crop case final type? when stage > 0) {
+      _paintCropArt(canvas, Offset(size.width / 2, size.height * .51),
+          size.shortestSide * (.45 + stage * .14), type, stage);
     }
   }
-
-  Color _stageColor(int stage) => switch (stage) {
-        1 => const Color(0xFF9CCC65),
-        2 => const Color(0xFF74A93A),
-        3 => const Color(0xFF52912E),
-        _ => const Color(0xFF3E8E41),
-      };
 
   @override
   bool shouldRepaint(PlotPainter oldDelegate) =>
+      crop != oldDelegate.crop ||
       stage != oldDelegate.stage ||
       ready != oldDelegate.ready ||
       tilled != oldDelegate.tilled ||
@@ -819,10 +784,18 @@ class PlotPainter extends CustomPainter {
 
 /// Canteiro individual renderizado como losango isométrico.
 class PlotWidget extends StatelessWidget {
-  const PlotWidget({super.key, required this.plot, required this.onTap});
+  const PlotWidget({
+    super.key,
+    required this.plot,
+    required this.onTap,
+    this.onPressStart,
+    this.onPressEnd,
+  });
 
   final Plot plot;
   final VoidCallback onTap;
+  final VoidCallback? onPressStart;
+  final VoidCallback? onPressEnd;
 
   @override
   Widget build(BuildContext context) {
@@ -845,25 +818,36 @@ class PlotWidget extends StatelessWidget {
     return Semantics(
       button: true,
       label: label,
-      child: ClipPath(
-        clipper: const IsoDiamondClipper(),
-        clipBehavior: Clip.hardEdge,
-        child: GestureDetector(
-          onTap: onTap,
-          child: CustomPaint(
-            painter: PlotPainter(
+      child: Stack(
+        fit: StackFit.expand,
+        clipBehavior: Clip.none,
+        children: [
+          IgnorePointer(
+            child: CustomPaint(
+              painter: PlotPainter(
+                crop: plot.plantedCrop,
                 stage: stage,
                 ready: ready,
                 tilled: plot.tilled,
-                wet: plot.isWet(now)),
-            child: SizedBox.expand(
+                wet: plot.isWet(now),
+              ),
+            ),
+          ),
+          ClipPath(
+            clipper: const IsoDiamondClipper(),
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: onTap,
+              onTapDown: onPressStart == null ? null : (_) => onPressStart!(),
+              onTapUp: onPressEnd == null ? null : (_) => onPressEnd!(),
+              onTapCancel: onPressEnd,
               child: dead
                   ? const Center(
                       child: Icon(Icons.eco, color: Color(0xff443426)))
-                  : null,
+                  : const SizedBox.expand(),
             ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -1062,10 +1046,7 @@ class CropSelectorSheet extends StatelessWidget {
                   return ListTile(
                     leading: Opacity(
                       opacity: unlocked ? 1.0 : 0.4,
-                      child: Text(
-                        crop.emoji,
-                        style: const TextStyle(fontSize: 28),
-                      ),
+                      child: _CropArtwork(type: type),
                     ),
                     title: Row(
                       children: [
@@ -1290,10 +1271,12 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-enum _FarmTool { inspect, hoe, seed, water, fertilizer, harvest }
+enum _FarmTool { hoe, seed, water, fertilizer, harvest }
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
-  _FarmTool _tool = _FarmTool.inspect;
+  _FarmTool _tool = _FarmTool.harvest;
+  Plot? _plantingPlot;
+  Timer? _plantHold;
   Plot? _focusedPlot;
   String? _plotHint;
   CropType _seed = CropType.alface;
@@ -1396,6 +1379,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (_plantingPlot case final plot?
+        when state != AppLifecycleState.resumed) {
+      _endPlanting(plot);
+    }
     if (state == AppLifecycleState.resumed) {
       // Ao retomar, re-renderiza com DateTime.now(): o tempo offline é
       // contabilizado e as plantações não ficam congeladas.
@@ -1407,6 +1394,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _tick?.cancel();
+    _plantHold?.cancel();
     _bannerRetryTimer?.cancel();
     _bannerAd?.dispose();
     super.dispose();
@@ -1427,24 +1415,74 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     setState(() {});
   }
 
+  void _inspectPlot(Plot? plot) {
+    if (identical(_focusedPlot, plot) && _plotHint == null) return;
+    setState(() {
+      _focusedPlot = plot;
+      _plotHint = null;
+    });
+  }
+
+  void _beginPlanting(Plot plot) {
+    final player = widget.player;
+    if (_plantingPlot != null ||
+        !plot.isEmpty ||
+        !plot.isWet(DateTime.now()) ||
+        (player.seeds[_seed] ?? 0) <= 0 ||
+        !player.isUnlocked(_seed)) return;
+
+    final seed = Crops.of(_seed);
+    setState(() {
+      _focusedPlot = _plantingPlot = plot;
+      _plotHint = null;
+    });
+    _plantHold = Timer(Plot.plantingDuration, () {
+      if (!mounted || !identical(_plantingPlot, plot)) return;
+      _plantHold = null;
+      final planted = player.plant(plot, seed, DateTime.now(), prepared: true);
+      if (planted) widget.onShouldSave?.call();
+      setState(() {
+        _plantingPlot = null;
+        _plotHint = planted
+            ? null
+            : 'Plantio não concluído. Confira o solo e as sementes.';
+      });
+    });
+  }
+
+  void _endPlanting(Plot plot) {
+    if (!identical(_plantingPlot, plot)) return;
+    _plantHold?.cancel();
+    _plantHold = null;
+    setState(() => _plantingPlot = null);
+  }
+
+  void _selectTool(_FarmTool tool) {
+    _plantHold?.cancel();
+    _plantHold = null;
+    setState(() {
+      _tool = tool;
+      _plantingPlot = null;
+      _focusedPlot = null;
+      _plotHint = null;
+    });
+  }
+
   void _handlePlotTap(Plot plot) {
     final player = widget.player;
     final now = DateTime.now();
     String? hint;
     final changed = switch (_tool) {
-      _FarmTool.inspect => false,
       _FarmTool.hoe => plot.hoe(now),
       _FarmTool.water => plot.water(now),
       _FarmTool.fertilizer => player.fertilize(plot, now),
-      _FarmTool.seed => player.plant(plot, Crops.of(_seed), now),
+      _FarmTool.seed => false,
       _FarmTool.harvest => player.harvest(plot, now) > 0,
     };
-    if (!changed &&
-        _tool == _FarmTool.seed &&
-        plot.isEmpty &&
-        plot.isWet(now) &&
-        (player.seeds[_seed] ?? 0) == 0) {
-      hint = 'Sem sementes de ${_seed.label} · abra a Loja';
+    if (_tool == _FarmTool.seed && plot.isEmpty && plot.isWet(now)) {
+      hint = (player.seeds[_seed] ?? 0) == 0
+          ? 'Sem sementes de ${_seed.label} · abra a Loja'
+          : 'Segure para plantar ${_seed.label}';
     }
     if (!changed && _tool == _FarmTool.fertilizer) {
       hint = player.fertilizer == 0
@@ -1487,7 +1525,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   const Text('A colheita ainda está vazia.'),
                 for (final entry in player.basket.entries)
                   ListTile(
-                    leading: const Icon(Icons.inventory_2_outlined),
+                    leading: _CropArtwork(type: entry.key),
                     title: Text(entry.key.label),
                     subtitle: Text('Quantidade: ${entry.value}'),
                     trailing: TextButton(
@@ -1563,28 +1601,42 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void _showSeeds() {
     final player = widget.player;
     _showFarmDialog(
-        'Sementes guardadas',
-        (_) => Column(
-              mainAxisSize: MainAxisSize.min,
+      'Sementes guardadas',
+      (update) => player.seeds.isEmpty
+          ? const Text(
+              'Compre sementes na Loja ou resgate uma recompensa de visita.')
+          : Wrap(
+              spacing: 8,
+              runSpacing: 8,
               children: [
-                if (player.seeds.isEmpty)
-                  const Text(
-                      'Compre sementes na Loja ou resgate uma recompensa de visita.'),
                 for (final entry in player.seeds.entries)
-                  ListTile(
-                    title: Text(entry.key.label),
-                    subtitle: Text('Quantidade: ${entry.value}'),
-                    onTap: () {
-                      Navigator.of(context).pop();
-                      setState(() {
+                  Tooltip(
+                    message: '${entry.key.label} · ${entry.value} sementes',
+                    child: OutlinedButton(
+                      onPressed: () {
+                        Navigator.of(context).pop();
                         _seed = entry.key;
-                        _tool = _FarmTool.seed;
-                        _plotHint = null;
-                      });
-                    },
+                        _selectTool(_FarmTool.seed);
+                      },
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _CropArtwork(type: entry.key, quantity: entry.value),
+                          Text(entry.key.label,
+                              style: const TextStyle(fontSize: 12)),
+                        ],
+                      ),
+                    ),
                   ),
               ],
-            ));
+            ),
+    );
   }
 
   void _showShop() {
@@ -1634,18 +1686,60 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  Widget _toolButton(_FarmTool tool, IconData icon, String label) {
+  Widget _toolButton(_FarmTool tool, String label, {VoidCallback? onPressed}) {
     final active = _tool == tool;
-    return TextButton.icon(
-      style: TextButton.styleFrom(
-        padding: const EdgeInsets.symmetric(horizontal: 7),
-        foregroundColor:
-            active ? const Color(0xff29351f) : const Color(0xfffff5d8),
-        backgroundColor: active ? const Color(0xfff9cf72) : null,
+    return IconButton(
+      isSelected: active,
+      tooltip: label,
+      style: IconButton.styleFrom(
+        backgroundColor: active ? const Color(0x99e5bc5c) : null,
+        minimumSize: const Size(50, 50),
+        padding: const EdgeInsets.all(6),
       ),
-      onPressed: () => setState(() => _tool = tool),
-      icon: Icon(icon, size: 17),
-      label: Text(label),
+      onPressed: onPressed ?? () => _selectTool(tool),
+      icon: SizedBox.square(
+          dimension: 36, child: CustomPaint(painter: _ToolArt(tool))),
+    );
+  }
+
+  Widget _shortcut(String label, _FarmShortcut illustration, String description,
+      VoidCallback onTap) {
+    return Tooltip(
+      message: description,
+      child: Semantics(
+        button: true,
+        label: label,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: onTap,
+          child: SizedBox(
+            width: MediaQuery.sizeOf(context).width < 540 ? 44 : 52,
+            height: 58,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                SizedBox.square(
+                  dimension: 33,
+                  child: CustomPaint(painter: _ShortcutArt(illustration)),
+                ),
+                Text(label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      height: 1.2,
+                      fontWeight: FontWeight.bold,
+                      shadows: [
+                        Shadow(color: Colors.black, blurRadius: 5),
+                        Shadow(color: Colors.black, offset: Offset(0, 1))
+                      ],
+                    )),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -1663,6 +1757,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             onBuyPlot: _buyNewPlot,
             focusedPlot: _focusedPlot,
             plotHint: _plotHint,
+            plantingPlot: _plantingPlot,
+            onPressStart: _tool == _FarmTool.seed ? _beginPlanting : null,
+            onPressEnd: _tool == _FarmTool.seed ? _endPlanting : null,
+            onInspect: _tool == _FarmTool.harvest ? _inspectPlot : null,
           ),
           SafeArea(
             minimum: const EdgeInsets.all(8),
@@ -1670,41 +1768,98 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               children: [
                 Align(
                   alignment: Alignment.topLeft,
-                  child: _FarmPanel(child: _LevelStatus(player: player)),
+                  child: _FarmPanel(
+                      child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Tooltip(
+                        message: 'Perfil da fazenda',
+                        child: CircleAvatar(
+                          radius: 16,
+                          backgroundColor: Color(0xff456d42),
+                          child: Icon(Icons.eco,
+                              color: Color(0xffcef291), size: 20),
+                        ),
+                      ),
+                      _LevelStatus(player: player),
+                      Tooltip(
+                        message: 'Moedas disponíveis',
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          const Icon(Icons.monetization_on,
+                              color: Color(0xffffd167), size: 20),
+                          Text(' ${player.coins}'),
+                        ]),
+                      ),
+                      if (MediaQuery.sizeOf(context).width >= 610) ...[
+                        const SizedBox(width: 12),
+                        Tooltip(
+                          message: 'Canteiros cultiváveis',
+                          child: Text('🌱 ${player.plots.length}'),
+                        ),
+                      ],
+                    ],
+                  )),
                 ),
                 Align(
                   alignment: Alignment.topRight,
-                  child: _FarmPanel(
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.monetization_on,
-                            color: Color(0xffffd167), size: 17),
-                        const SizedBox(width: 5),
-                        Text('${player.coins}'),
-                        TextButton(
-                            onPressed: _showWarehouse,
-                            child: Text('Armazém ${player.basketCount}')),
-                        TextButton(
-                            onPressed: _showShop, child: const Text('Loja')),
-                        if (widget.socialClient case final client?)
-                          IconButton(
-                            tooltip: 'Amigos',
-                            icon: const Icon(Icons.people, size: 20),
-                            onPressed: () => showSocialFarm(context, client),
-                          ),
-                        IconButton(
-                          tooltip: 'Login diário',
-                          icon: const Icon(Icons.card_giftcard, size: 20),
-                          onPressed: _showVisits,
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.trending_up, size: 20),
-                          tooltip: 'Melhorias',
-                          onPressed: _showUpgrades,
-                        ),
-                      ],
-                    ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _shortcut('Armazém', _FarmShortcut.warehouse,
+                          'Armazém ${player.basketCount}', _showWarehouse),
+                      _shortcut('Loja', _FarmShortcut.store,
+                          'Comprar sementes e fertilizantes', _showShop),
+                      _shortcut('Amigos', _FarmShortcut.friends,
+                          'Visitar fazendas de amigos', () {
+                        if (widget.socialClient case final client?) {
+                          showSocialFarm(context, client);
+                        } else {
+                          _showFarmDialog(
+                              'Amigos',
+                              (_) => const Text(
+                                  'O modo social está indisponível nesta versão.'));
+                        }
+                      }),
+                      _shortcut(
+                          'Ranking',
+                          _FarmShortcut.ranking,
+                          'Classificação das fazendas',
+                          () => _showFarmDialog(
+                              'Ranking',
+                              (_) => const Text(
+                                  'A classificação online ainda não está disponível.'))),
+                      _shortcut(
+                          'Avisos',
+                          _FarmShortcut.notices,
+                          'Login diário e melhorias',
+                          () => _showFarmDialog(
+                              'Avisos',
+                              (update) => Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      ListTile(
+                                          leading:
+                                              const Icon(Icons.card_giftcard),
+                                          title: const Text('Login diário'),
+                                          onTap: () {
+                                            Navigator.of(context,
+                                                    rootNavigator: true)
+                                                .pop();
+                                            _showVisits();
+                                          }),
+                                      ListTile(
+                                          leading:
+                                              const Icon(Icons.trending_up),
+                                          title: const Text('Melhorias'),
+                                          onTap: () {
+                                            Navigator.of(context,
+                                                    rootNavigator: true)
+                                                .pop();
+                                            _showUpgrades();
+                                          }),
+                                    ],
+                                  ))),
+                    ],
                   ),
                 ),
                 Align(
@@ -1715,28 +1870,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          _toolButton(_FarmTool.inspect, Icons.touch_app,
-                              'Inspecionar'),
-                          _toolButton(_FarmTool.hoe, Icons.handyman, 'Enxada'),
-                          TextButton.icon(
-                            style: TextButton.styleFrom(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 7),
-                            ),
-                            onPressed: _showSeeds,
-                            icon: const Icon(Icons.eco, size: 17),
-                            label: Text(_tool == _FarmTool.seed
-                                ? '${_seed.label} · ${player.seeds[_seed] ?? 0}'
-                                : 'Sementes'),
-                          ),
-                          _toolButton(
-                              _FarmTool.water, Icons.water_drop, 'Regar'),
-                          _toolButton(
-                              _FarmTool.fertilizer,
-                              Icons.science_outlined,
-                              'Adubo ${player.fertilizer}'),
-                          _toolButton(
-                              _FarmTool.harvest, Icons.agriculture, 'Colher'),
+                          _toolButton(_FarmTool.hoe, 'Enxada'),
+                          _toolButton(_FarmTool.seed, 'Sementes',
+                              onPressed: _showSeeds),
+                          _toolButton(_FarmTool.water, 'Regar'),
+                          _toolButton(_FarmTool.fertilizer,
+                              'Adubo · ${player.fertilizer}'),
+                          _toolButton(_FarmTool.harvest, 'Colher'),
                         ],
                       ),
                     ),
@@ -1911,7 +2051,7 @@ class _LevelStatus extends StatelessWidget {
   Widget build(BuildContext context) {
     final target = player.levelXpGoal;
     return SizedBox(
-      width: 146,
+      width: MediaQuery.sizeOf(context).width < 540 ? 107 : 146,
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 7),
         child: Column(
@@ -1961,6 +2101,10 @@ class _FarmScene extends StatelessWidget {
     required this.onBuyPlot,
     required this.focusedPlot,
     required this.plotHint,
+    this.plantingPlot,
+    this.onPressStart,
+    this.onPressEnd,
+    this.onInspect,
   });
 
   final Player player;
@@ -1968,6 +2112,10 @@ class _FarmScene extends StatelessWidget {
   final VoidCallback onBuyPlot;
   final Plot? focusedPlot;
   final String? plotHint;
+  final Plot? plantingPlot;
+  final ValueChanged<Plot>? onPressStart;
+  final ValueChanged<Plot>? onPressEnd;
+  final ValueChanged<Plot?>? onInspect;
 
   @override
   Widget build(BuildContext context) {
@@ -2015,52 +2163,87 @@ class _FarmScene extends StatelessWidget {
 
         final focus =
             player.plots.indexWhere((plot) => identical(plot, focusedPlot));
-        return ColoredBox(
-          color: const Color(0xFF253F29),
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              ExcludeSemantics(
-                child:
-                    Image.asset('assets/images/farm.webp', fit: BoxFit.cover),
+        void inspectAt(Offset p) {
+          for (var i = player.plots.length - 1; i >= 0; i--) {
+            final dx = (p.dx - leftFor(i) - tileW / 2).abs() / (tileW / 2);
+            final dy = (p.dy - topFor(i) - tileH / 2).abs() / (tileH / 2);
+            if (dx + dy <= 1) {
+              onInspect?.call(player.plots[i]);
+              return;
+            }
+          }
+          onInspect?.call(null);
+        }
+
+        return MouseRegion(
+          cursor:
+              onInspect == null ? MouseCursor.defer : SystemMouseCursors.grab,
+          onHover: onInspect == null
+              ? null
+              : (event) => inspectAt(event.localPosition),
+          onExit: onInspect == null ? null : (_) => onInspect?.call(null),
+          child: Listener(
+            behavior: HitTestBehavior.opaque,
+            onPointerMove: onInspect == null
+                ? null
+                : (event) => inspectAt(event.localPosition),
+            child: ColoredBox(
+              color: const Color(0xFF253F29),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  ExcludeSemantics(
+                    child: Image.asset('assets/images/farm.webp',
+                        fit: BoxFit.cover),
+                  ),
+                  // Índice crescente = mais perto do observador; desenhado por
+                  // último para dar a sobreposição frontal correta.
+                  for (var i = 0; i < player.plots.length; i++)
+                    Positioned(
+                      left: leftFor(i),
+                      top: topFor(i),
+                      width: tileW,
+                      height: tileH,
+                      child: PlotWidget(
+                        plot: player.plots[i],
+                        onTap: () => onPlotTap(player.plots[i]),
+                        onPressStart: onPressStart == null
+                            ? null
+                            : () => onPressStart!(player.plots[i]),
+                        onPressEnd: onPressEnd == null
+                            ? null
+                            : () => onPressEnd!(player.plots[i]),
+                      ),
+                    ),
+                  if (player.canBuyMorePlots && tileCount > 0)
+                    Positioned(
+                      left: leftFor(player.plots.length),
+                      top: topFor(player.plots.length),
+                      width: tileW,
+                      height: tileH,
+                      child: NewPlotTile(
+                        cost: player.nextPlotCost,
+                        enabled: player.coins >= player.nextPlotCost,
+                        onTap: onBuyPlot,
+                      ),
+                    ),
+                  if (focus >= 0)
+                    Positioned(
+                      width: 192,
+                      left: (leftFor(focus) + tileW / 2 - 96)
+                          .clamp(4.0, math.max(4.0, w - 196)),
+                      top: math.max(52.0, topFor(focus) - 68),
+                      child: IgnorePointer(
+                        child: _PlotNotice(
+                            plot: player.plots[focus],
+                            hint: plotHint,
+                            planting:
+                                identical(player.plots[focus], plantingPlot)),
+                      ),
+                    ),
+                ],
               ),
-              // Índice crescente = mais perto do observador; desenhado por
-              // último para dar a sobreposição frontal correta.
-              for (var i = 0; i < player.plots.length; i++)
-                Positioned(
-                  left: leftFor(i),
-                  top: topFor(i),
-                  width: tileW,
-                  height: tileH,
-                  child: PlotWidget(
-                    plot: player.plots[i],
-                    onTap: () => onPlotTap(player.plots[i]),
-                  ),
-                ),
-              if (player.canBuyMorePlots && tileCount > 0)
-                Positioned(
-                  left: leftFor(player.plots.length),
-                  top: topFor(player.plots.length),
-                  width: tileW,
-                  height: tileH,
-                  child: NewPlotTile(
-                    cost: player.nextPlotCost,
-                    enabled: player.coins >= player.nextPlotCost,
-                    onTap: onBuyPlot,
-                  ),
-                ),
-              if (focus >= 0)
-                Positioned(
-                  width: 192,
-                  left: (leftFor(focus) + tileW / 2 - 96)
-                      .clamp(4.0, math.max(4.0, w - 196)),
-                  top: math.max(52.0, topFor(focus) - 68),
-                  child: IgnorePointer(
-                    child:
-                        _PlotNotice(plot: player.plots[focus], hint: plotHint),
-                  ),
-                ),
-            ],
+            ),
           ),
         );
       },
@@ -2069,7 +2252,10 @@ class _FarmScene extends StatelessWidget {
 }
 
 class _PlotNotice extends StatelessWidget {
-  const _PlotNotice({required this.plot, required this.hint});
+  const _PlotNotice(
+      {required this.plot, required this.hint, required this.planting});
+
+  final bool planting;
 
   final Plot plot;
   final String? hint;
@@ -2080,7 +2266,9 @@ class _PlotNotice extends StatelessWidget {
     final String label;
     double? progress;
     String? details;
-    if (hint != null) {
+    if (planting) {
+      label = 'Plantando semente…';
+    } else if (hint != null) {
       label = hint!;
     } else if (plot.isWatering(now) || plot.isPlanting(now)) {
       final watering = plot.isWatering(now);
@@ -2100,7 +2288,7 @@ class _PlotNotice extends StatelessWidget {
           ? '${plot.plantedCrop!.label} pronta para colher'
           : '${plot.plantedCrop!.label} crescendo';
       details =
-          'Saúde $health/100${remaining.isNegative ? '' : ' · ${_HomeScreenState._formatDuration(remaining)}'}';
+          'Saúde $health/100${remaining.isNegative ? '' : ' · Colheita em ${_HomeScreenState._formatDuration(remaining)}'}';
       progress = plot.progress(now);
     } else if (!plot.tilled) {
       label = 'Use a enxada para preparar';
@@ -2120,6 +2308,15 @@ class _PlotNotice extends StatelessWidget {
                 style: const TextStyle(fontSize: 12)),
             if (details != null)
               Text(details, style: const TextStyle(fontSize: 11)),
+            if (planting) ...[
+              const SizedBox(height: 5),
+              TweenAnimationBuilder<double>(
+                tween: Tween(begin: 0, end: 1),
+                duration: Plot.plantingDuration,
+                builder: (context, value, child) => LinearProgressIndicator(
+                    value: value, minHeight: 6, color: const Color(0xffffd55c)),
+              ),
+            ],
             if (progress != null) ...[
               const SizedBox(height: 4),
               LinearProgressIndicator(value: progress, minHeight: 4),

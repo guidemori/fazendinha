@@ -24,7 +24,7 @@ void main() {
     await tester.pump();
     expect(find.text('Terra seca · regue antes de plantar'), findsOneWidget);
 
-    await tester.tap(find.text('Regar'));
+    await tester.tap(find.byTooltip('Regar'));
     await tester.tap(tile);
     await tester.pump();
     expect(find.text('Regando terra…'), findsOneWidget);
@@ -38,23 +38,51 @@ void main() {
     await tester.pumpAndSettle();
     expect(player.coins, 10);
     expect(player.seeds[CropType.alface], 1);
-    await tester.tap(find.text('Sementes'));
+    await tester.tap(find.byTooltip('Sementes'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Alface'));
     await tester.pumpAndSettle();
     await tester.tap(tile);
     await tester.pump();
+    expect(find.text('Segure para plantar Alface'), findsOneWidget);
+    expect(player.seeds[CropType.alface], 1);
+
+    var hold = await tester.startGesture(tester.getCenter(tile));
+    await tester.pump(const Duration(milliseconds: 750));
     expect(find.text('Plantando semente…'), findsOneWidget);
+    await hold.up();
+    await tester.pump(Plot.plantingDuration);
+    expect(plot.isEmpty, isTrue);
+    expect(player.seeds[CropType.alface], 1);
+
+    hold = await tester.startGesture(tester.getCenter(tile));
+    await tester.pump(const Duration(milliseconds: 150));
+    await tester.pump(Plot.plantingDuration);
+    expect(plot.stage(DateTime.now()), 1);
     expect(player.seeds[CropType.alface], isNull);
+    await hold.up();
+    await tester.pump();
+
+    await tester.tap(find.byTooltip('Colher'));
+    await tester.pump();
+    final center = tester.getCenter(tile);
+    final inspection = await tester.startGesture(center - const Offset(48, 0));
+    await inspection.moveTo(center);
+    await inspection.moveBy(const Offset(2, 0));
+    await tester.pump();
+    expect(find.textContaining('Colheita em '), findsOneWidget);
+    await inspection.up();
+    expect(plot.isPlanted, isTrue);
+
     expect(player.coins, 10);
 
     plot.plantedAt = DateTime.now().subtract(const Duration(minutes: 1));
-    await tester.tap(find.text('Colher'));
+    await tester.tap(find.byTooltip('Colher'));
     await tester.tap(tile);
     await tester.pump();
     expect(find.text('12/100 XP'), findsOneWidget);
     expect(player.coins, 10);
-    await tester.tap(find.text('Armazém 1'));
+    await tester.tap(find.byTooltip('Armazém 1'));
     await tester.pumpAndSettle();
     expect(find.text('Quantidade: 1'), findsOneWidget);
     await tester.tap(find.text('Vender por 12'));
@@ -64,7 +92,7 @@ void main() {
     await tester.tap(find.text('Fechar'));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Enxada'));
+    await tester.tap(find.byTooltip('Enxada'));
     await tester.tap(tile);
     await tester.pump();
     expect(plot.tilled, isTrue);
@@ -98,7 +126,9 @@ void main() {
     await tester.pumpWidget(FazendinhaApp(player: player, visitsApi: api));
     await tester.pumpAndSettle();
     expect(calls, ['/v2/visits']);
-    await tester.tap(find.byTooltip('Login diário'));
+    await tester.tap(find.text('Avisos'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Login diário'));
     await tester.pumpAndSettle();
     expect(find.text('Sequência: 1 dia(s) consecutivo(s)'), findsOneWidget);
     await tester.tap(find.text('Resgatar'));
