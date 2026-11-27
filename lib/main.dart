@@ -194,22 +194,22 @@ class Crops {
         CropType.abobora => const Crop(
             type: CropType.abobora,
             seedCost: 600,
-            sellValue: 950,
-            growTime: Duration(minutes: 90),
+            sellValue: 1260,
+            growTime: Duration(hours: 3),
             unlockLevel: 6,
           ),
         CropType.cafe => const Crop(
             type: CropType.cafe,
             seedCost: 1000,
-            sellValue: 1550,
-            growTime: Duration(hours: 2),
+            sellValue: 2100,
+            growTime: Duration(hours: 5),
             unlockLevel: 7,
           ),
         CropType.cana => const Crop(
             type: CropType.cana,
             seedCost: 1800,
-            sellValue: 2800,
-            growTime: Duration(hours: 3),
+            sellValue: 3560,
+            growTime: Duration(hours: 8),
             unlockLevel: 8,
           ),
       };
