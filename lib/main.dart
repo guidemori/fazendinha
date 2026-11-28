@@ -433,6 +433,8 @@ enum UpgradeType {
 // ------------------------------------------------------------
 // [models/player.dart]  Estado central do jogador
 // ------------------------------------------------------------
+typedef _FarmNotice = ({String message, DateTime at});
+
 class Player {
   Player({
     required this.coins,
@@ -487,6 +489,14 @@ class Player {
   bool ownsGuardDog(DateTime now) => guardDogOwnedUntil?.isAfter(now) ?? false;
   static const guardDogFoodCost = 15;
   Duration guardDogMealTime = const Duration(hours: 12);
+  final List<_FarmNotice> notices = [];
+
+  void addNotice(String message, DateTime at) {
+    if (notices.lastOrNull?.message == message) return;
+    notices.add((message: message, at: at));
+    if (notices.length > 50) notices.removeAt(0);
+  }
+
   int guardDogFood = 0;
   DateTime? guardDogFedUntil;
 
@@ -840,6 +850,10 @@ class Player {
         'cowFeed': cowFeed,
         'guardDogOwnedUntil': guardDogOwnedUntil?.toIso8601String(),
         'guardDogFood': guardDogFood,
+        'notices': [
+          for (final notice in notices)
+            {'message': notice.message, 'at': notice.at.toIso8601String()},
+        ],
         'guardDogFedUntil': guardDogFedUntil?.toIso8601String(),
         'basket': basket.map((type, amount) => MapEntry(type.name, amount)),
         'seeds': seeds.map((type, amount) => MapEntry(type.name, amount)),
@@ -898,6 +912,17 @@ class Player {
         (map['hasGuardDog'] == true
             ? DateTime.now().add(guardDogLifetime)
             : null);
+    if (map['notices'] case final List savedNotices) {
+      for (final entry in savedNotices) {
+        if (entry is! Map) continue;
+        final message = entry['message'];
+        final stamp = entry['at'];
+        if (message is! String || stamp is! String) continue;
+        if (DateTime.tryParse(stamp) case final DateTime at) {
+          player.addNotice(message, at);
+        }
+      }
+    }
     final savedDogFood = map['guardDogFood'];
     if (savedDogFood is int && savedDogFood > 0)
       player.guardDogFood = savedDogFood;
@@ -1832,7 +1857,7 @@ class UpgradeSheet extends StatelessWidget {
             Row(
               children: [
                 const Expanded(
-                  child: _FarmMenuTitle('Melhorias da fazenda', 'sprout'),
+                  child: _FarmMenuTitle('Melhorias da fazenda', 'upgrades'),
                 ),
                 IconButton(
                   tooltip: 'Fechar melhorias',
@@ -2088,6 +2113,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _showFarmMessage(String message) {
+    widget.player.addNotice(message, DateTime.now());
+    widget.onShouldSave?.call();
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(
@@ -2568,17 +2595,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-  Future<void> _showNotices() async {
-    final openLogin = await showDialog<bool>(
+  void _showNotices() {
+    final client = widget.socialClient;
+    showDialog<void>(
       context: context,
-      builder: (context) => const _FarmNoticesDialog(),
+      builder: (context) => _FarmNoticesDialog(
+        notices: List.of(widget.player.notices),
+        client: client?.auth.currentSession == null ? null : client,
+      ),
     );
-    if (!mounted || openLogin == null) return;
-    if (openLogin) {
-      _showVisits();
-    } else {
-      _showUpgrades();
-    }
   }
 
   void _showUpgrades() {
@@ -2863,38 +2888,46 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ),
                 Align(
                   alignment: Alignment.topRight,
-                  child: _FarmPanel(
-                    translucent: true,
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        _shortcut('Armazém', _FarmShortcut.warehouse,
-                            'Armazém ${player.basketCount}', _showWarehouse),
-                        _shortcut('Loja', _FarmShortcut.store,
-                            'Comprar sementes e fertilizantes', _showShop),
-                        _shortcut('Amigos', _FarmShortcut.friends,
-                            'Visitar fazendas de amigos', () {
-                          if (widget.socialClient case final client?) {
-                            showSocialFarm(context, client,
-                                guardOwnedUntil: player.guardDogOwnedUntil);
-                          } else {
-                            _showFarmDialog(
-                                'Amigos',
-                                (_) => const Text(
-                                    'O modo social está indisponível nesta versão.'));
-                          }
-                        }),
-                        _shortcut(
-                            'Ranking',
-                            _FarmShortcut.ranking,
-                            'Classificação das fazendas',
-                            () => _showFarmDialog(
-                                'Ranking',
-                                (_) => const Text(
-                                    'A classificação online ainda não está disponível.'))),
-                        _shortcut('Avisos', _FarmShortcut.notices,
-                            'Login diário e melhorias', _showNotices),
-                      ],
+                  child: Padding(
+                    padding: EdgeInsets.only(
+                        top: MediaQuery.sizeOf(context).width < 700 ? 46 : 0),
+                    child: _FarmPanel(
+                      translucent: true,
+                      child: Wrap(
+                        alignment: WrapAlignment.end,
+                        children: [
+                          _shortcut('Armazém', _FarmShortcut.warehouse,
+                              'Armazém ${player.basketCount}', _showWarehouse),
+                          _shortcut('Loja', _FarmShortcut.store,
+                              'Comprar sementes e fertilizantes', _showShop),
+                          _shortcut('Amigos', _FarmShortcut.friends,
+                              'Visitar fazendas de amigos', () {
+                            if (widget.socialClient case final client?) {
+                              showSocialFarm(context, client,
+                                  guardOwnedUntil: player.guardDogOwnedUntil);
+                            } else {
+                              _showFarmDialog(
+                                  'Amigos',
+                                  (_) => const Text(
+                                      'O modo social está indisponível nesta versão.'));
+                            }
+                          }),
+                          _shortcut(
+                              'Ranking',
+                              _FarmShortcut.ranking,
+                              'Classificação das fazendas',
+                              () => _showFarmDialog(
+                                  'Ranking',
+                                  (_) => const Text(
+                                      'A classificação online ainda não está disponível.'))),
+                          _shortcut('Check-in', _FarmShortcut.check_in,
+                              'Recompensa diária', _showVisits),
+                          _shortcut('Melhorias', _FarmShortcut.upgrades,
+                              'Melhorias da fazenda', _showUpgrades),
+                          _shortcut('Avisos', _FarmShortcut.notices,
+                              'Notificações da fazenda', _showNotices),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -3040,7 +3073,7 @@ class _VisitRewardsDialogState extends State<_VisitRewardsDialog> {
       );
     }
     return AlertDialog(
-      title: const _FarmMenuTitle('Login diário', 'seed'),
+      title: const _FarmMenuTitle('Check-in', 'check_in'),
       content:
           SizedBox(width: 480, child: SingleChildScrollView(child: content)),
       actions: [
@@ -3093,127 +3126,79 @@ class _FarmMenuTitle extends StatelessWidget {
   }
 }
 
-class _FarmNoticesDialog extends StatelessWidget {
-  const _FarmNoticesDialog();
+class _FarmNoticesDialog extends StatefulWidget {
+  const _FarmNoticesDialog({required this.notices, required this.client});
+
+  final List<_FarmNotice> notices;
+  final SupabaseClient? client;
 
   @override
-  Widget build(BuildContext context) {
-    return Dialog(
-      backgroundColor: const Color(0xff23382b),
-      surfaceTintColor: Colors.transparent,
-      insetPadding: const EdgeInsets.all(12),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
-        side: const BorderSide(color: Color(0xffac8951)),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 400),
-        child: SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(
-                  children: [
-                    const Expanded(
-                      child: _FarmMenuTitle('Avisos', 'notices'),
-                    ),
-                    IconButton(
-                      tooltip: 'Fechar',
-                      color: const Color(0xffffecc0),
-                      onPressed: () => Navigator.pop(context),
-                      icon: const Icon(Icons.close_rounded),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                _FarmNoticeTile(
-                  title: 'Login diário',
-                  description: 'Resgate moedas e sementes',
-                  illustration: 'seed',
-                  accent: 'coin',
-                  color: const Color(0xffede0b6),
-                  onTap: () => Navigator.pop(context, true),
-                ),
-                const SizedBox(height: 8),
-                _FarmNoticeTile(
-                  title: 'Melhorias',
-                  description: 'Invista na produção da fazenda',
-                  illustration: 'water',
-                  accent: 'sprout',
-                  color: const Color(0xffd9e6be),
-                  onTap: () => Navigator.pop(context, false),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  State<_FarmNoticesDialog> createState() => _FarmNoticesDialogState();
 }
 
-class _FarmNoticeTile extends StatelessWidget {
-  const _FarmNoticeTile({
-    required this.title,
-    required this.description,
-    required this.illustration,
-    required this.accent,
-    required this.color,
-    required this.onTap,
-  });
+class _FarmNoticesDialogState extends State<_FarmNoticesDialog> {
+  late final Future<List<_FarmNotice>> _remote = _loadSocialNotices();
 
-  final String title;
-  final String description;
-  final String illustration;
-  final String accent;
-  final Color color;
-  final VoidCallback onTap;
+  Future<List<_FarmNotice>> _loadSocialNotices() async {
+    final client = widget.client;
+    if (client == null) return [];
+    final rows = await client.rpc('farm_social_notices') as List;
+    return [
+      for (final row in rows.cast<Map<String, dynamic>>())
+        if (DateTime.tryParse(row['created_at'] as String)
+            case final DateTime at)
+          (
+            message: row['guarded'] == true
+                ? 'O cachorro impediu ${row['visitor_name']} de roubar a colheita.'
+                : '${row['visitor_name']} roubou uma unidade de ${row['crop']} da sua fazenda.',
+            at: at,
+          ),
+    ];
+  }
 
   @override
-  Widget build(BuildContext context) {
-    final shape = RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(12),
-      side: const BorderSide(color: Color(0xffbd9d61)),
-    );
-    return Material(
-      color: color,
-      shape: shape,
-      clipBehavior: Clip.antiAlias,
-      child: ListTile(
-        tileColor: Colors.transparent,
-        minVerticalPadding: 10,
-        leading: SizedBox.square(
-          dimension: 48,
-          child: Stack(
-            children: [
-              Image.asset(_farmIcon(illustration),
-                  width: 44, height: 44, excludeFromSemantics: true),
-              Positioned(
-                right: 0,
-                bottom: 0,
-                child: Image.asset(_farmIcon(accent),
-                    width: 19, height: 19, excludeFromSemantics: true),
-              ),
-            ],
+  Widget build(BuildContext context) => AlertDialog(
+        title: const _FarmMenuTitle('Avisos', 'notices'),
+        content: SizedBox(
+          width: 420,
+          height: 260,
+          child: FutureBuilder<List<_FarmNotice>>(
+            future: _remote,
+            builder: (context, snapshot) {
+              final notices = [...widget.notices, ...?snapshot.data]
+                ..sort((a, b) => b.at.compareTo(a.at));
+              final localizations = MaterialLocalizations.of(context);
+              return ListView(
+                children: [
+                  if (snapshot.connectionState == ConnectionState.waiting)
+                    const LinearProgressIndicator(),
+                  if (snapshot.hasError)
+                    const ListTile(title: Text('Avisos online indisponíveis.')),
+                  if (notices.isEmpty &&
+                      snapshot.connectionState == ConnectionState.done &&
+                      !snapshot.hasError)
+                    const ListTile(title: Text('Você ainda não tem avisos.')),
+                  for (final notice in notices)
+                    ListTile(
+                      leading: const Icon(Icons.notifications_outlined),
+                      title: Text(notice.message),
+                      subtitle: Text(
+                        '${localizations.formatCompactDate(notice.at.toLocal())}'
+                        ' · ${localizations.formatTimeOfDay(TimeOfDay.fromDateTime(notice.at.toLocal()))}',
+                      ),
+                    ),
+                ],
+              );
+            },
           ),
         ),
-        title: Text(title,
-            style: const TextStyle(
-              color: Color(0xff243429),
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-            )),
-        subtitle: Text(description,
-            style: const TextStyle(color: Color(0xff39483a), fontSize: 12)),
-        trailing:
-            const Icon(Icons.chevron_right_rounded, color: Color(0xff405439)),
-        onTap: onTap,
-      ),
-    );
-  }
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Fechar'),
+          ),
+        ],
+      );
 }
 
 class _FarmPanel extends StatelessWidget {
@@ -4401,6 +4386,20 @@ void main() async {
       } else {
         player.guardDogOwnedUntil = DateTime.now().add(Player.guardDogLifetime);
       }
+    }
+    if (const bool.fromEnvironment('WEEDS_PREVIEW')) {
+      final now = DateTime.now();
+      player.weedControl += 2;
+      player.plots[0]
+        .._harvestsUntilWeeds = 0
+        ..plantedCrop = CropType.tomate
+        ..plantedAt = now.subtract(const Duration(minutes: 2))
+        ..growDuration = const Duration(minutes: 5);
+      player.plots[1]
+        .._harvestsUntilWeeds = 0
+        ..plantedCrop = CropType.cenoura
+        ..plantedAt = now.subtract(const Duration(minutes: 3))
+        ..growDuration = const Duration(minutes: 2, seconds: 30);
     }
     runApp(FazendinhaApp(player: player));
     return;

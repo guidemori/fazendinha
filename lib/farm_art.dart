@@ -1,6 +1,14 @@
 part of 'main.dart';
 
-enum _FarmShortcut { warehouse, store, friends, ranking, notices }
+enum _FarmShortcut {
+  warehouse,
+  store,
+  friends,
+  ranking,
+  check_in,
+  upgrades,
+  notices
+}
 
 String _cropSprite(CropType crop, int stage) =>
     'assets/images/farm_sprites/crops/${crop.name}_$stage.webp';

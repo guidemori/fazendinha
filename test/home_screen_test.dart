@@ -806,9 +806,7 @@ void main() {
     await tester.pumpWidget(FazendinhaApp(player: player, visitsApi: api));
     await tester.pumpAndSettle();
     expect(calls, ['/v2/visits']);
-    await tester.tap(find.text('Avisos'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Login diário'));
+    await tester.tap(find.text('Check-in'));
     await tester.pumpAndSettle();
     expect(find.text('Sequência: 1 dia(s) consecutivo(s)'), findsOneWidget);
     await tester.tap(find.text('Resgatar'));
@@ -818,6 +816,33 @@ void main() {
     expect(player.coins, 27);
     expect(player.seeds[CropType.alface], 1);
     await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('avisos guardam mensagens e os atalhos ficam na barra',
+      (tester) async {
+    final player = Player.initial()
+      ..addNotice('Aviso de teste', DateTime(2026, 11, 28, 10));
+    await tester
+        .pumpWidget(FazendinhaApp(player: Player.fromMap(player.toMap())));
+    await tester.pumpAndSettle();
+    expect(find.text('Check-in'), findsOneWidget);
+    expect(find.text('Melhorias'), findsOneWidget);
+
+    await tester.tap(find.text('Avisos'));
+    await tester.pumpAndSettle();
+    final dialog = find.byType(AlertDialog);
+    expect(find.descendant(of: dialog, matching: find.text('Aviso de teste')),
+        findsOneWidget);
+    expect(find.descendant(of: dialog, matching: find.text('Check-in')),
+        findsNothing);
+    expect(find.descendant(of: dialog, matching: find.text('Melhorias')),
+        findsNothing);
+    await tester.tap(find.text('Fechar'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Melhorias'));
+    await tester.pumpAndSettle();
+    expect(find.text('Melhorias da fazenda'), findsOneWidget);
   });
 
   testWidgets('ressincroniza o login na virada do dia sem resgatar sozinho',
@@ -841,9 +866,7 @@ void main() {
     );
     await tester.pumpWidget(FazendinhaApp(player: player, visitsApi: api));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Avisos'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Login diário'));
+    await tester.tap(find.text('Check-in'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Resgatar'));
     await tester.pumpAndSettle();
