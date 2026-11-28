@@ -27,7 +27,15 @@ Future<SupabaseClient?> configureSocialFarm() async {
   }
 }
 
-Future<void> showSocialFarm(BuildContext context, SupabaseClient client) =>
+Future<DateTime?> updateSocialGuard(SupabaseClient client,
+    {required bool feed, bool renew = true}) async {
+  final result = await client
+      .rpc('farm_social_guard', params: {'p_feed': feed, 'p_renew': renew});
+  return result is String ? DateTime.tryParse(result) : null;
+}
+
+Future<void> showSocialFarm(BuildContext context, SupabaseClient client,
+        {required bool hasGuardDog}) =>
     showDialog<void>(
       context: context,
       builder: (context) => StreamBuilder<AuthState>(
@@ -38,14 +46,17 @@ Future<void> showSocialFarm(BuildContext context, SupabaseClient client) =>
             client.auth.currentUser?.lastSignInAt,
           )),
           client: client,
+          hasGuardDog: hasGuardDog,
         ),
       ),
     );
 
 class _SocialFarmDialog extends StatefulWidget {
-  const _SocialFarmDialog({required this.client, super.key});
+  const _SocialFarmDialog(
+      {required this.client, required this.hasGuardDog, super.key});
 
   final SupabaseClient client;
+  final bool hasGuardDog;
 
   @override
   State<_SocialFarmDialog> createState() => _SocialFarmDialogState();
@@ -62,6 +73,7 @@ class _SocialFarmDialogState extends State<_SocialFarmDialog> {
   bool _busy = false;
   bool _loaded = false;
   bool _facebookSyncNeeded = false;
+  bool _guardSynced = false;
 
   SupabaseClient get _client => widget.client;
 
@@ -156,6 +168,16 @@ class _SocialFarmDialogState extends State<_SocialFarmDialog> {
       'farm_social_profile',
       params: {if (name != null) 'p_name': name},
     ) as Map<String, dynamic>?;
+    if (profile != null && widget.hasGuardDog && !_guardSynced) {
+      try {
+        await updateSocialGuard(_client, feed: false, renew: false);
+        _guardSynced = true;
+      } on PostgrestException catch (error) {
+        if (error.code != 'PGRST202') rethrow;
+        if (mounted)
+          _message = 'A guarda ainda não está disponível no servidor.';
+      }
+    }
     final synced = profile != null && await _syncFacebook();
     final friends = profile == null
         ? <Map<String, dynamic>>[]
@@ -183,9 +205,14 @@ class _SocialFarmDialogState extends State<_SocialFarmDialog> {
 
   Future<void> _harvest(Map<String, dynamic> plot) async {
     final owner = _owner!;
-    await _client.rpc('farm_social_harvest', params: {'p_plot': plot['id']});
+    final result = await _client
+        .rpc('farm_social_harvest', params: {'p_plot': plot['id']});
     if (!mounted) return;
     await _visit(owner);
+    if (result == 'guard_dog_protected') {
+      if (mounted) _message = 'O cachorro protegeu este canteiro.';
+      return;
+    }
     final inventory = await _rows('farm_social_inventory');
     if (!mounted) return;
     _inventory = inventory;
@@ -254,12 +281,16 @@ class _SocialFarmDialogState extends State<_SocialFarmDialog> {
               for (final plot in _plots)
                 ListTile(
                   title: Text('${plot['crop']}'),
-                  subtitle: Text('${plot['remaining']} disponível(is)'),
+                  subtitle: Text(
+                    '${plot['remaining']} disponível(is)'
+                    '${(plot['protected'] as int? ?? 0) > 0 ? ' · ${plot['protected']} sob guarda' : ''}',
+                  ),
                   trailing: TextButton(
                     onPressed: _busy ||
                             plot['claimed'] == true ||
                             plot['ready'] != true ||
-                            plot['remaining'] == 0
+                            (plot['remaining'] == 0 &&
+                                (plot['protected'] as int? ?? 0) == 0)
                         ? null
                         : () => _run(() => _harvest(plot)),
                     child: Text(plot['claimed'] == true ? 'Colhido' : 'Colher'),

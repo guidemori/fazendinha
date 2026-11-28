@@ -95,24 +95,85 @@ class _CropSoilRim extends CustomPainter {
       stage != oldDelegate.stage || inset != oldDelegate.inset;
 }
 
+Widget _farmToolArtwork(_FarmTool tool, double size) {
+  if (tool == _FarmTool.weedControl) return _WeedControlIcon(size: size);
+  return Image.asset(_farmIcon(tool.name),
+      width: size, height: size, excludeFromSemantics: true);
+}
+
+class _WeedControlIcon extends StatelessWidget {
+  const _WeedControlIcon({required this.size});
+
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox.square(
+      dimension: size,
+      child: Stack(
+        children: [
+          ColorFiltered(
+            colorFilter: const ColorFilter.matrix([
+              .19,
+              .54,
+              .05,
+              0,
+              14,
+              .12,
+              .37,
+              .04,
+              0,
+              8,
+              .23,
+              .68,
+              .09,
+              0,
+              20,
+              0,
+              0,
+              0,
+              1,
+              0,
+            ]),
+            child: Image.asset(_farmIcon('fertilizer'),
+                width: size, height: size, excludeFromSemantics: true),
+          ),
+          Positioned(
+            right: 0,
+            bottom: 0,
+            child: Icon(Icons.shield,
+                size: size * .48, color: const Color(0xffdac5ff)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _FarmActionEffect extends StatelessWidget {
-  const _FarmActionEffect({super.key, required this.tool, required this.onEnd});
+  const _FarmActionEffect({
+    super.key,
+    required this.tool,
+    required this.onEnd,
+    required this.xp,
+  });
 
   final VoidCallback onEnd;
+  final int xp;
 
   final _FarmTool tool;
 
   @override
   Widget build(BuildContext context) {
     final water = tool == _FarmTool.water;
-    final fertilizer = tool == _FarmTool.fertilizer;
+    final fertilizer =
+        tool == _FarmTool.fertilizer || tool == _FarmTool.weedControl;
     final harvest = tool == _FarmTool.harvest;
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0, end: 1),
-      duration: Duration(milliseconds: water ? 950 : 550),
+      duration: Duration(milliseconds: water || harvest ? 950 : 550),
       onEnd: onEnd,
-      child: Image.asset(_farmIcon(tool.name),
-          width: 39, height: 39, excludeFromSemantics: true),
+      child: _farmToolArtwork(tool, 39),
       builder: (context, progress, sprite) {
         if (progress >= 1) return const SizedBox.shrink();
         final strike = math.sin(progress * math.pi);
@@ -138,6 +199,29 @@ class _FarmActionEffect extends StatelessWidget {
                   ),
                 ),
               ),
+              if (xp > 0)
+                Positioned(
+                  left: -22,
+                  width: 104,
+                  top: 21 - 41 * Curves.easeOut.transform(progress),
+                  child: Opacity(
+                    opacity: (1 - (progress - .5).clamp(0.0, .5) * 2),
+                    child: Text(
+                      '+$xp XP',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Color(0xffffe193),
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        shadows: [
+                          Shadow(color: Color(0xff342111), blurRadius: 4),
+                          Shadow(
+                              color: Color(0xff342111), offset: Offset(0, 1)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
               if (water || fertilizer || tool == _FarmTool.hoe)
                 for (var i = 0; i < 4; i++)
                   Positioned(

@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -16,7 +17,7 @@ class MainActivity : FlutterActivity() {
             "little_farm/daily_login_reminder"
         ).setMethodCallHandler { call, result ->
             if (call.method == "enable") {
-                enableDailyReminder()
+                enableDailyReminder(fromSettingsButton = call.arguments == true)
                 result.success(null)
             } else {
                 result.notImplemented()
@@ -45,19 +46,34 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun enableDailyReminder() {
+    private fun enableDailyReminder(fromSettingsButton: Boolean) {
         val settings = getSharedPreferences("daily_login_reminder", MODE_PRIVATE)
         settings.edit().putBoolean("configured", true).apply()
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
-            if (!settings.getBoolean("permission_requested", false)) {
+            val permission = Manifest.permission.POST_NOTIFICATIONS
+            val alreadyRequested = settings.getBoolean("permission_requested", false)
+            if (!alreadyRequested ||
+                (fromSettingsButton && shouldShowRequestPermissionRationale(permission))
+            ) {
                 settings.edit().putBoolean("permission_requested", true).apply()
-                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REMINDER_PERMISSION)
+                requestPermissions(arrayOf(permission), REMINDER_PERMISSION)
+            } else if (fromSettingsButton) {
+                openNotificationSettings()
             }
             return
         }
+        if (fromSettingsButton && Build.VERSION.SDK_INT >= 26) {
+            openNotificationSettings()
+        }
         DailyLoginReminder.schedule(this)
+    }
+
+    private fun openNotificationSettings() {
+        startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+            putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+        })
     }
 
     override fun onRequestPermissionsResult(

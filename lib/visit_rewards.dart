@@ -4,8 +4,11 @@ import 'dart:math';
 import 'package:http/http.dart' as http;
 
 class VisitRewardsApi {
-  VisitRewardsApi(this.base, this.installationKey, {http.Client? client})
-      : _client = client ?? http.Client();
+  VisitRewardsApi(Uri base, this.installationKey, {http.Client? client})
+      : base = base.path.endsWith('/')
+            ? base
+            : base.replace(path: '${base.path}/'),
+        _client = client ?? http.Client();
 
   static const event = 'daily-login-v2';
   static const dayLimit = 7;
@@ -36,12 +39,19 @@ class VisitRewardsApi {
           body: date == null ? null : jsonEncode({'date': date}),
         )
         .timeout(const Duration(seconds: 8));
+    if (date != null && response.statusCode == 409) {
+      throw const VisitClaimUnavailable();
+    }
     if (response.statusCode != 200) {
       throw const FormatException(
           'O serviço de visitas recusou a solicitação.');
     }
     return VisitSnapshot.fromJson(jsonDecode(response.body));
   }
+}
+
+class VisitClaimUnavailable implements Exception {
+  const VisitClaimUnavailable();
 }
 
 class VisitSnapshot {
