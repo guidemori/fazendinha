@@ -493,10 +493,10 @@ class Player {
   bool isGuardDogFed(DateTime now) =>
       ownsGuardDog(now) && (guardDogFedUntil?.isAfter(now) ?? false);
 
-  bool buyGuardDogFood() {
-    if (coins < guardDogFoodCost) return false;
-    coins -= guardDogFoodCost;
-    guardDogFood++;
+  bool buyGuardDogFood({int quantity = 1}) {
+    if (quantity < 1 || quantity > coins ~/ guardDogFoodCost) return false;
+    coins -= guardDogFoodCost * quantity;
+    guardDogFood += quantity;
     return true;
   }
 
@@ -569,10 +569,10 @@ class Player {
         .clamp(0.0, 1.0);
   }
 
-  bool buyCowFeed() {
-    if (coins < cowFeedCost) return false;
-    coins -= cowFeedCost;
-    cowFeed++;
+  bool buyCowFeed({int quantity = 1}) {
+    if (quantity < 1 || quantity > coins ~/ cowFeedCost) return false;
+    coins -= cowFeedCost * quantity;
+    cowFeed += quantity;
     return true;
   }
 
@@ -1443,9 +1443,9 @@ class CropSelectorSheet extends StatefulWidget {
   final VoidCallback onBuyFertilizer;
   final VoidCallback onBuyWeedControl;
   final VoidCallback onBuyCow;
-  final VoidCallback onBuyCowFeed;
+  final ValueChanged<int> onBuyCowFeed;
   final VoidCallback onBuyGuardDog;
-  final VoidCallback onBuyGuardDogFood;
+  final ValueChanged<int> onBuyGuardDogFood;
   final bool startOnAnimals;
   final Future<void> Function() onOpenWarehouse;
 
@@ -1453,9 +1453,12 @@ class CropSelectorSheet extends StatefulWidget {
   State<CropSelectorSheet> createState() => _CropSelectorSheetState();
 }
 
+enum _AnimalFeed { cow, dog }
+
 class _CropSelectorSheetState extends State<CropSelectorSheet> {
   late bool _showAnimals = widget.startOnAnimals;
   CropType? _selected;
+  _AnimalFeed? _selectedFeed;
   int _quantity = 1;
   Player get player => widget.player;
 
@@ -1499,6 +1502,74 @@ class _CropSelectorSheetState extends State<CropSelectorSheet> {
     return '${d.inSeconds}s';
   }
 
+  Widget _bulkPurchase(int cost, ValueChanged<int> onBuy) {
+    final maxQuantity = player.coins ~/ cost;
+    final quantity = math.min(_quantity, maxQuantity);
+    return Padding(
+      padding: const EdgeInsets.only(left: 16, right: 16, bottom: 8),
+      child: Wrap(
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 6,
+        children: [
+          IconButton(
+            tooltip: 'Diminuir quantidade',
+            onPressed: quantity <= 1
+                ? null
+                : () => setState(() => _quantity = quantity - 1),
+            icon: const Icon(Icons.remove),
+          ),
+          Text('$quantity / $maxQuantity'),
+          IconButton(
+            tooltip: 'Aumentar quantidade',
+            onPressed: quantity >= maxQuantity
+                ? null
+                : () => setState(() => _quantity = quantity + 1),
+            icon: const Icon(Icons.add),
+          ),
+          FilledButton(
+            onPressed: () {
+              onBuy(quantity);
+              setState(() => _quantity = 1);
+            },
+            child: Text('Comprar por ${cost * quantity} moedas'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _feedItem(
+    _AnimalFeed item, {
+    required Widget artwork,
+    required String title,
+    required int stock,
+    required int cost,
+    required ValueChanged<int> onBuy,
+  }) {
+    final canAfford = player.coins >= cost;
+    return Column(
+      children: [
+        ListTile(
+          leading: artwork,
+          title: Text(title),
+          subtitle: Text('🪙 $cost por porção · Estoque: $stock'),
+          trailing: const Icon(Icons.chevron_right, color: Colors.green),
+          onTap: () {
+            if (!canAfford) {
+              _showInsufficientCoins(cost);
+              return;
+            }
+            setState(() {
+              _selectedFeed = item;
+              _quantity = 1;
+            });
+          },
+        ),
+        if (_selectedFeed == item && canAfford) _bulkPurchase(cost, onBuy),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return SafeArea(
@@ -1527,8 +1598,12 @@ class _CropSelectorSheetState extends State<CropSelectorSheet> {
               ],
               selected: {_showAnimals},
               showSelectedIcon: false,
-              onSelectionChanged: (selection) =>
-                  setState(() => _showAnimals = selection.single),
+              onSelectionChanged: (selection) => setState(() {
+                _showAnimals = selection.single;
+                _selected = null;
+                _selectedFeed = null;
+                _quantity = 1;
+              }),
             ),
             const SizedBox(height: 8),
             Expanded(
@@ -1587,18 +1662,13 @@ class _CropSelectorSheetState extends State<CropSelectorSheet> {
                       ),
                     ),
                   if (_showAnimals)
-                    ListTile(
-                      leading: const _CowFeedIcon(),
-                      title: const Text('Ração para vaca'),
-                      subtitle: Text(
-                          '1 porção por abastecimento · Estoque: ${player.cowFeed}'),
-                      trailing: FilledButton.tonal(
-                        onPressed: player.coins >= Player.cowFeedCost
-                            ? widget.onBuyCowFeed
-                            : () => _showInsufficientCoins(Player.cowFeedCost),
-                        child: const Text(
-                            'Comprar ração · ${Player.cowFeedCost} moedas'),
-                      ),
+                    _feedItem(
+                      _AnimalFeed.cow,
+                      artwork: const _CowFeedIcon(),
+                      title: 'Ração para vaca',
+                      stock: player.cowFeed,
+                      cost: Player.cowFeedCost,
+                      onBuy: widget.onBuyCowFeed,
                     ),
                   if (_showAnimals)
                     ListTile(
@@ -1620,18 +1690,13 @@ class _CropSelectorSheetState extends State<CropSelectorSheet> {
                       ),
                     ),
                   if (_showAnimals)
-                    ListTile(
-                      leading: const _GuardDogFoodIcon(),
-                      title: const Text('Ração para cachorro'),
-                      subtitle: Text('Estoque: ${player.guardDogFood}'),
-                      trailing: FilledButton.tonal(
-                        onPressed: player.coins >= Player.guardDogFoodCost
-                            ? widget.onBuyGuardDogFood
-                            : () =>
-                                _showInsufficientCoins(Player.guardDogFoodCost),
-                        child: const Text(
-                            'Comprar · ${Player.guardDogFoodCost} moedas'),
-                      ),
+                    _feedItem(
+                      _AnimalFeed.dog,
+                      artwork: const _GuardDogFoodIcon(),
+                      title: 'Ração para cachorro',
+                      stock: player.guardDogFood,
+                      cost: Player.guardDogFoodCost,
+                      onBuy: widget.onBuyGuardDogFood,
                     ),
                   ...List<Widget>.generate(
                     _showAnimals ? 0 : CropType.values.length,
@@ -1644,8 +1709,6 @@ class _CropSelectorSheetState extends State<CropSelectorSheet> {
                       final canAfford = player.coins >= cost;
                       final isNew = player.isNewlyUnlocked(type);
 
-                      final maxQuantity = player.coins ~/ cost;
-                      final quantity = math.min(_quantity, maxQuantity);
                       return Column(children: [
                         ListTile(
                           leading: Opacity(
@@ -1730,41 +1793,8 @@ class _CropSelectorSheetState extends State<CropSelectorSheet> {
                           },
                         ),
                         if (_selected == type && unlocked && canAfford)
-                          Padding(
-                            padding: const EdgeInsets.only(
-                                left: 16, right: 16, bottom: 8),
-                            child: Wrap(
-                              crossAxisAlignment: WrapCrossAlignment.center,
-                              spacing: 6,
-                              children: [
-                                IconButton(
-                                  tooltip: 'Diminuir quantidade',
-                                  onPressed: quantity <= 1
-                                      ? null
-                                      : () => setState(
-                                          () => _quantity = quantity - 1),
-                                  icon: const Icon(Icons.remove),
-                                ),
-                                Text('$quantity / $maxQuantity'),
-                                IconButton(
-                                  tooltip: 'Aumentar quantidade',
-                                  onPressed: quantity >= maxQuantity
-                                      ? null
-                                      : () => setState(
-                                          () => _quantity = quantity + 1),
-                                  icon: const Icon(Icons.add),
-                                ),
-                                FilledButton(
-                                  onPressed: () {
-                                    widget.onSelected(type, quantity);
-                                    setState(() => _quantity = 1);
-                                  },
-                                  child: Text(
-                                      'Comprar por ${cost * quantity} moedas'),
-                                ),
-                              ],
-                            ),
-                          ),
+                          _bulkPurchase(cost,
+                              (quantity) => widget.onSelected(type, quantity)),
                       ]);
                     },
                   ),
@@ -2490,8 +2520,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           player: widget.player,
           onOpenWarehouse: _showWarehouse,
           startOnAnimals: animals,
-          onBuyGuardDogFood: () {
-            if (widget.player.buyGuardDogFood()) {
+          onBuyGuardDogFood: (quantity) {
+            if (widget.player.buyGuardDogFood(quantity: quantity)) {
               _farmChanged();
               update(() {});
             }
@@ -2503,8 +2533,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               update(() {});
             }
           },
-          onBuyCowFeed: () {
-            if (widget.player.buyCowFeed()) {
+          onBuyCowFeed: (quantity) {
+            if (widget.player.buyCowFeed(quantity: quantity)) {
               _farmChanged();
               update(() {});
             }
@@ -3501,7 +3531,7 @@ class _FarmSceneState extends State<_FarmScene> {
             GameConstants.plotCenterForIndex(i).dy * scale -
             tileH / 2;
 
-        final patrolOffset = Offset(-tileW * .7, tileH * 1.15);
+        final patrolOffset = Offset(tileW * .90, -tileH * .75);
         final patrolLength =
             (player.plots.length - 1) ~/ GameConstants.gridColumns;
         final patrolEnd = GameConstants.plotCenterForIndex(
@@ -3722,7 +3752,7 @@ class _FarmSceneState extends State<_FarmScene> {
                     if (dogFed)
                       Positioned.fill(
                         child: _GuardPatrol(
-                          start: origin + patrolOffset,
+                          start: origin + patrolOffset + patrolEnd * .35,
                           end: origin +
                               patrolOffset +
                               patrolEnd +

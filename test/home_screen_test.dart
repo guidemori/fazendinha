@@ -517,10 +517,12 @@ void main() {
     expect(player.hasCow, isTrue);
     expect(find.text('Comprada'), findsOneWidget);
     expect(player.coins, Player.cowFeedCost * 2);
-    await tester.ensureVisible(find.text('Comprar ração · 30 moedas'));
-    await tester.tap(find.text('Comprar ração · 30 moedas'));
+    await tester.tap(find.text('Ração para vaca'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Comprar ração · 30 moedas'));
+    await tester.tap(find.byTooltip('Aumentar quantidade'));
+    await tester.pumpAndSettle();
+    expect(find.text('2 / 2'), findsOneWidget);
+    await tester.tap(find.text('Comprar por 60 moedas'));
     await tester.pumpAndSettle();
     expect(player.cowFeed, 2);
     expect(player.coins, 0);
@@ -616,7 +618,7 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(1200, 850));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final player = Player.initial()
-      ..coins += Player.guardDogCost
+      ..coins += Player.guardDogCost + Player.guardDogFoodCost
       ..buyGuardDog(DateTime.now());
     await tester.pumpWidget(FazendinhaApp(player: player));
     await tester.pumpAndSettle();
@@ -627,18 +629,26 @@ void main() {
 
     await tester.tap(sleeping);
     await tester.pumpAndSettle();
-    final buy = find.text('Comprar · 15 moedas');
+    final feedItem = find.text('Ração para cachorro');
     await tester.scrollUntilVisible(
-      buy,
+      feedItem,
       70,
       scrollable: find.descendant(
           of: find.byType(CropSelectorSheet),
           matching: find.byType(Scrollable)),
     );
     await tester.pumpAndSettle();
-    await tester.tap(buy);
+    await tester.tap(feedItem);
     await tester.pumpAndSettle();
-    expect(player.guardDogFood, 1);
+    final more = find.byTooltip('Aumentar quantidade');
+    await tester.ensureVisible(more);
+    await tester.pumpAndSettle();
+    await tester.tap(more);
+    await tester.pumpAndSettle();
+    expect(find.text('2 / 2'), findsOneWidget);
+    await tester.tap(find.text('Comprar por 30 moedas'));
+    await tester.pumpAndSettle();
+    expect(player.guardDogFood, 2);
     expect(player.coins, 0);
     await tester.tap(find.byTooltip('Fechar loja'));
     await tester.pumpAndSettle();
@@ -647,11 +657,15 @@ void main() {
     await tester.tap(sleeping);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
-    expect(player.guardDogFood, 0);
+    expect(player.guardDogFood, 1);
     expect(player.guardDogFedUntil!.difference(beforeMeal).inHours, 12);
     expect(Player.fromMap(player.toMap()).guardDogFedUntil,
         player.guardDogFedUntil);
     expect(patrolling, findsOneWidget);
+    expect(
+      tester.getCenter(patrolling).dx,
+      greaterThan(tester.getCenter(find.byType(PlotWidget).first).dx),
+    );
 
     player.guardDogFedUntil = DateTime.now();
     await tester.pump(const Duration(seconds: 1));
