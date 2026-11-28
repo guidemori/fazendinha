@@ -4,7 +4,7 @@
 // Cole este conteúdo como: lib/main.dart
 // (substitui toda a estrutura de pastas lib/core, lib/models, lib/ui)
 //
-// Fase 2: expansão de canteiros + upgrades permanentes
+// Fase 2: expansão de canteiros + melhorias temporárias
 // (venda melhor, semente barata, crescimento rápido) e destaque
 // visual "Novo!" para culturas recém-desbloqueadas.
 //
@@ -28,6 +28,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'dairy_cow_art.dart';
+import 'rewarded_upgrade_ad.dart';
 import 'social_farm.dart';
 import 'visit_rewards.dart';
 
@@ -40,6 +41,16 @@ bool get _useTestAds =>
     !kIsWeb &&
     defaultTargetPlatform == TargetPlatform.android &&
     const bool.fromEnvironment('ENABLE_TEST_ADS', defaultValue: true);
+
+String? get _rewardedUpgradeUnit {
+  if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return null;
+  const configured = String.fromEnvironment('LITTLE_FARM_REWARDED_AD_UNIT_ID');
+  if (configured.isNotEmpty) return configured;
+  return _useTestAds ? 'ca-app-pub-3940256099942544/5224354917' : null;
+}
+
+bool get _simulateUpgradeAd =>
+    kIsWeb && const bool.fromEnvironment('WEEDS_PREVIEW');
 
 // ------------------------------------------------------------
 // [core/game_constants.dart]  Constantes centrais do jogo
@@ -59,9 +70,6 @@ class GameConstants {
 
   /// Intervalo de salvamento automático (segundos).
   static const int autoSaveSeconds = 30;
-
-  /// Nível máximo de cada upgrade.
-  static const int maxUpgradeLevel = 10;
 
   /// Geometria do losango isométrico.
   ///
@@ -424,10 +432,12 @@ enum UpgradeType {
       };
 
   String get description => switch (this) {
-        UpgradeType.sellBoost => '+20% de venda por nível',
-        UpgradeType.seedDiscount => '−15% no custo da semente por nível',
-        UpgradeType.growSpeed => '−10% no tempo de crescimento por nível',
+        UpgradeType.sellBoost => '+20% na venda das culturas',
+        UpgradeType.seedDiscount => '−15% no preço das sementes',
+        UpgradeType.growSpeed => '−10% no crescimento dos novos plantios',
       };
+
+  Duration get duration => Duration(minutes: this == growSpeed ? 30 : 15);
 }
 
 // ------------------------------------------------------------
@@ -464,6 +474,19 @@ class Player {
   int sellBoostLevel;
   int seedDiscountLevel;
   int growSpeedLevel;
+  final Map<UpgradeType, DateTime> upgradeEndsAt = {};
+
+  Duration upgradeRemaining(UpgradeType type, DateTime now) {
+    final remaining = upgradeEndsAt[type]?.difference(now) ?? Duration.zero;
+    return remaining > Duration.zero ? remaining : Duration.zero;
+  }
+
+  bool grantUpgrade(UpgradeType type, DateTime now) {
+    if (upgradeRemaining(type, now) > Duration.zero) return false;
+    upgradeEndsAt[type] = now.add(type.duration);
+    return true;
+  }
+
   final Map<CropType, int> basket = {};
   final Map<CropType, int> seeds = {};
   static const fertilizerCost = 50;
@@ -737,18 +760,43 @@ class Player {
   /// Cultura acaba de ser desbloqueada no nível atual (badge "Novo!").
   bool isNewlyUnlocked(CropType type) => level == Crops.of(type).unlockLevel;
 
-  // Efeitos acumulativos (multiplicativos) dos upgrades.
-  double get sellMultiplier => math.pow(1.20, sellBoostLevel).toDouble();
-  double get seedCostMultiplier => math.pow(0.85, seedDiscountLevel).toDouble();
-  double get growTimeMultiplier => math.pow(0.90, growSpeedLevel).toDouble();
+  int _effectiveUpgradeLevel(UpgradeType type, DateTime now) {
+    final legacyLevel = switch (type) {
+      UpgradeType.sellBoost => sellBoostLevel,
+      UpgradeType.seedDiscount => seedDiscountLevel,
+      UpgradeType.growSpeed => growSpeedLevel,
+    };
+    return legacyLevel + (upgradeRemaining(type, now) > Duration.zero ? 1 : 0);
+  }
 
-  int effectiveSeedCost(Crop crop) =>
-      (crop.seedCost * seedCostMultiplier).round();
-  int effectiveSellValue(Crop crop) =>
-      (crop.sellValue * sellMultiplier).round();
-  Duration effectiveGrowTime(Crop crop) => Duration(
-        milliseconds:
-            (crop.growTime.inMilliseconds * growTimeMultiplier).round(),
+  int effectiveSeedCost(Crop crop, {DateTime? now}) => (crop.seedCost *
+          math.pow(
+              .85,
+              _effectiveUpgradeLevel(
+                UpgradeType.seedDiscount,
+                now ?? DateTime.now(),
+              )))
+      .round()
+      .clamp(1, crop.seedCost);
+
+  int effectiveSellValue(Crop crop, {DateTime? now}) => (crop.sellValue *
+          math.pow(
+              1.20,
+              _effectiveUpgradeLevel(
+                UpgradeType.sellBoost,
+                now ?? DateTime.now(),
+              )))
+      .round();
+
+  Duration effectiveGrowTime(Crop crop, {DateTime? now}) => Duration(
+        milliseconds: (crop.growTime.inMilliseconds *
+                math.pow(
+                    .90,
+                    _effectiveUpgradeLevel(
+                      UpgradeType.growSpeed,
+                      now ?? DateTime.now(),
+                    )))
+            .round(),
       );
 
   int get nextPlotCost {
@@ -770,38 +818,6 @@ class Player {
     return true;
   }
 
-  int upgradeLevel(UpgradeType type) => switch (type) {
-        UpgradeType.sellBoost => sellBoostLevel,
-        UpgradeType.seedDiscount => seedDiscountLevel,
-        UpgradeType.growSpeed => growSpeedLevel,
-      };
-
-  int upgradeCost(UpgradeType type) {
-    final currentLevel = upgradeLevel(type);
-    final (base, factor) = switch (type) {
-      UpgradeType.sellBoost => (100.0, 1.8),
-      UpgradeType.seedDiscount => (80.0, 1.6),
-      UpgradeType.growSpeed => (120.0, 1.7),
-    };
-    return (base * math.pow(factor, currentLevel)).round();
-  }
-
-  bool buyUpgrade(UpgradeType type) {
-    if (upgradeLevel(type) >= GameConstants.maxUpgradeLevel) return false;
-    final cost = upgradeCost(type);
-    if (coins < cost) return false;
-    coins -= cost;
-    switch (type) {
-      case UpgradeType.sellBoost:
-        sellBoostLevel++;
-      case UpgradeType.seedDiscount:
-        seedDiscountLevel++;
-      case UpgradeType.growSpeed:
-        growSpeedLevel++;
-    }
-    return true;
-  }
-
   bool plant(Plot plot, Crop crop, DateTime now, {bool prepared = false}) {
     if (plot.isPlanted || !plot.tilled || !plot.isWet(now)) return false;
     final stock = seeds[crop.type] ?? 0;
@@ -813,7 +829,7 @@ class Player {
     }
     plot.plantedCrop = crop.type;
     plot.plantedAt = prepared ? now : now.add(Plot.plantingDuration);
-    final duration = effectiveGrowTime(crop);
+    final duration = effectiveGrowTime(crop, now: now);
     plot.growDuration = plot.hasWeeds ? duration + duration ~/ 4 : duration;
     plot.wateredAt = null;
     return true;
@@ -866,6 +882,10 @@ class Player {
         'sellBoostLevel': sellBoostLevel,
         'seedDiscountLevel': seedDiscountLevel,
         'growSpeedLevel': growSpeedLevel,
+        'upgradeEndsAt': {
+          for (final entry in upgradeEndsAt.entries)
+            entry.key.name: entry.value.toIso8601String(),
+        },
       };
 
   factory Player.fromMap(Map<String, dynamic> map, {bool dairyTest = false}) {
@@ -876,6 +896,15 @@ class Player {
     player.sellBoostLevel = map['sellBoostLevel'] as int? ?? 0;
     player.seedDiscountLevel = map['seedDiscountLevel'] as int? ?? 0;
     player.growSpeedLevel = map['growSpeedLevel'] as int? ?? 0;
+    if (map['upgradeEndsAt'] case final Map activeUpgrades) {
+      for (final type in UpgradeType.values) {
+        final stamp = activeUpgrades[type.name];
+        if (stamp is! String) continue;
+        if (DateTime.tryParse(stamp) case final DateTime end) {
+          player.upgradeEndsAt[type] = end;
+        }
+      }
+    }
 
     final fertilizer = map['fertilizer'];
     if (fertilizer is int && fertilizer > 0) player.fertilizer = fertilizer;
@@ -1836,23 +1865,69 @@ class _CropSelectorSheetState extends State<CropSelectorSheet> {
 // ------------------------------------------------------------
 // [ui/widgets/upgrade_sheet.dart]  Modal de upgrades
 // ------------------------------------------------------------
-class UpgradeSheet extends StatelessWidget {
+class UpgradeSheet extends StatefulWidget {
   const UpgradeSheet({
     super.key,
     required this.player,
-    required this.onPurchased,
+    required this.requestReward,
+    required this.onGranted,
+    this.isPreview = false,
   });
 
   final Player player;
-  final VoidCallback onPurchased;
+  final Future<bool> Function()? requestReward;
+  final VoidCallback onGranted;
+  final bool isPreview;
+
+  @override
+  State<UpgradeSheet> createState() => _UpgradeSheetState();
+}
+
+class _UpgradeSheetState extends State<UpgradeSheet> {
+  late final Timer _tick;
+  UpgradeType? _pending;
+  String? _feedback;
+
+  @override
+  void initState() {
+    super.initState();
+    _tick = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _tick.cancel();
+    super.dispose();
+  }
+
+  Future<void> _watch(UpgradeType type) async {
+    final request = widget.requestReward;
+    if (request == null || _pending != null) return;
+    setState(() {
+      _pending = type;
+      _feedback = null;
+    });
+    final earned = await request();
+    if (earned && widget.player.grantUpgrade(type, DateTime.now())) {
+      widget.onGranted();
+    }
+    if (!mounted) return;
+    setState(() {
+      _pending = null;
+      _feedback =
+          earned ? null : 'A recompensa não foi liberada. Tente novamente.';
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
+    final now = DateTime.now();
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
-          mainAxisSize: MainAxisSize.min,
           children: [
             Row(
               children: [
@@ -1861,22 +1936,21 @@ class UpgradeSheet extends StatelessWidget {
                 ),
                 IconButton(
                   tooltip: 'Fechar melhorias',
-                  onPressed: () => Navigator.pop(context),
+                  onPressed:
+                      _pending == null ? () => Navigator.pop(context) : null,
                   icon: const Icon(Icons.close_rounded),
                 ),
               ],
             ),
+            if (widget.requestReward == null)
+              const Text('Anúncios recompensados indisponíveis nesta versão.'),
+            if (_feedback case final feedback?) Text(feedback),
             const SizedBox(height: 12),
-            Flexible(
+            Expanded(
               child: ListView(
-                shrinkWrap: true,
                 children: [
                   for (final type in UpgradeType.values)
-                    _UpgradeTile(
-                      player: player,
-                      type: type,
-                      onPurchased: onPurchased,
-                    ),
+                    _tile(type, widget.player.upgradeRemaining(type, now)),
                 ],
               ),
             ),
@@ -1885,69 +1959,28 @@ class UpgradeSheet extends StatelessWidget {
       ),
     );
   }
-}
 
-class _UpgradeTile extends StatelessWidget {
-  const _UpgradeTile({
-    required this.player,
-    required this.type,
-    required this.onPurchased,
-  });
-
-  final Player player;
-  final UpgradeType type;
-  final VoidCallback onPurchased;
-
-  @override
-  Widget build(BuildContext context) {
-    final currentLevel = player.upgradeLevel(type);
-    final maxed = currentLevel >= GameConstants.maxUpgradeLevel;
-    final cost = player.upgradeCost(type);
-    final canAfford = player.coins >= cost;
-
+  Widget _tile(UpgradeType type, Duration remaining) {
+    final active = remaining > Duration.zero;
+    final time = _HomeScreenState._formatDuration(remaining);
     return Card(
-      margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
-        leading: Text(type.emoji, style: const TextStyle(fontSize: 28)),
-        title: Text(type.label,
-            style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text(
-          '${type.description}\nNível $currentLevel/${GameConstants.maxUpgradeLevel}',
+        leading: Text(type.emoji, style: const TextStyle(fontSize: 26)),
+        title: Text(type.label),
+        subtitle: Text('${type.description} · ${type.duration.inMinutes} min'
+            '${active ? '\nAtiva por mais $time' : ''}'),
+        trailing: FilledButton(
+          onPressed: active || _pending != null || widget.requestReward == null
+              ? null
+              : () => _watch(type),
+          child: Text(active
+              ? 'Ativa'
+              : _pending == type
+                  ? 'Carregando…'
+                  : widget.isPreview
+                      ? 'Simular anúncio'
+                      : 'Assistir anúncio'),
         ),
-        isThreeLine: true,
-        trailing: maxed
-            ? const Text(
-                'Máx',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: Colors.green,
-                ),
-              )
-            : FilledButton(
-                style: canAfford
-                    ? null
-                    : FilledButton.styleFrom(
-                        backgroundColor: Colors.grey.shade400,
-                        foregroundColor: Colors.white,
-                      ),
-                onPressed: () {
-                  if (!canAfford) {
-                    ScaffoldMessenger.of(context)
-                      ..hideCurrentSnackBar()
-                      ..showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            'Moedas insuficientes! Faltam 🪙 ${cost - player.coins}.',
-                          ),
-                        ),
-                      );
-                    return;
-                  }
-                  final ok = player.buyUpgrade(type);
-                  if (ok) onPurchased();
-                },
-                child: Text('🪙 $cost'),
-              ),
       ),
     );
   }
@@ -2607,16 +2640,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _showUpgrades() {
+    final unit = _rewardedUpgradeUnit;
     _showFarmSheet(
-      builder: (context) => StatefulBuilder(
-        builder: (context, setSheetState) => UpgradeSheet(
-          player: widget.player,
-          onPurchased: () {
-            widget.onShouldSave?.call();
-            setState(() {});
-            setSheetState(() {});
-          },
-        ),
+      builder: (context) => UpgradeSheet(
+        player: widget.player,
+        isPreview: _simulateUpgradeAd,
+        requestReward: _simulateUpgradeAd
+            ? () async => true
+            : unit == null
+                ? null
+                : () => showRewardedUpgradeAd(unit),
+        onGranted: () {
+          widget.onShouldSave?.call();
+          if (mounted) setState(() {});
+        },
       ),
     );
   }
@@ -4365,7 +4402,7 @@ void main() async {
   }
   // AdMob de teste — o App ID real entra no AndroidManifest.xml.
   // Inicializa somente no Android (não na web), usando os IDs de teste.
-  if (_useTestAds) {
+  if (_useTestAds || _rewardedUpgradeUnit != null) {
     try {
       await MobileAds.instance.initialize();
     } catch (error) {

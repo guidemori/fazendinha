@@ -818,6 +818,59 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  test('benefícios temporários expiram sem apagar melhorias antigas', () {
+    final now = DateTime.utc(2026, 11, 28);
+    final player = Player.initial()..sellBoostLevel = 1;
+    final crop = Crops.of(CropType.milho);
+    final legacySale = player.effectiveSellValue(crop, now: now);
+    final seedCost = player.effectiveSeedCost(crop, now: now);
+    for (final type in UpgradeType.values) {
+      expect(player.grantUpgrade(type, now), isTrue);
+      expect(player.grantUpgrade(type, now), isFalse);
+    }
+    final restored = Player.fromMap(player.toMap());
+    final fifteen = now.add(const Duration(minutes: 15));
+    expect(
+        restored.effectiveSellValue(crop, now: now), greaterThan(legacySale));
+    expect(restored.effectiveSeedCost(crop, now: now), lessThan(seedCost));
+    expect(restored.effectiveSellValue(crop, now: fifteen), legacySale);
+    expect(restored.effectiveSeedCost(crop, now: fifteen), seedCost);
+    expect(restored.effectiveGrowTime(crop, now: fifteen),
+        lessThan(crop.growTime));
+    expect(
+      restored.effectiveGrowTime(crop,
+          now: now.add(const Duration(minutes: 30))),
+      crop.growTime,
+    );
+    expect(restored.coins, player.coins);
+  });
+
+  testWidgets('melhoria só ativa quando o anúncio libera a recompensa',
+      (tester) async {
+    final player = Player.initial();
+    var earned = false;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: UpgradeSheet(
+          player: player,
+          requestReward: () async => earned,
+          onGranted: () {},
+        ),
+      ),
+    ));
+    await tester.tap(find.text('Assistir anúncio').first);
+    await tester.pumpAndSettle();
+    expect(player.upgradeEndsAt, isEmpty);
+    expect(find.text('A recompensa não foi liberada. Tente novamente.'),
+        findsOneWidget);
+    earned = true;
+    await tester.tap(find.text('Assistir anúncio').first);
+    await tester.pumpAndSettle();
+    expect(player.upgradeEndsAt.keys, [UpgradeType.sellBoost]);
+    expect(find.text('Ativa'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('avisos guardam mensagens e os atalhos ficam na barra',
       (tester) async {
     final player = Player.initial()
