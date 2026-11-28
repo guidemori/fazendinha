@@ -28,14 +28,19 @@ Future<SupabaseClient?> configureSocialFarm() async {
 }
 
 Future<DateTime?> updateSocialGuard(SupabaseClient client,
-    {required bool feed, bool renew = true}) async {
-  final result = await client
-      .rpc('farm_social_guard', params: {'p_feed': feed, 'p_renew': renew});
+    {required bool feed,
+    required DateTime ownedUntil,
+    bool renew = true}) async {
+  final result = await client.rpc('farm_social_guard', params: {
+    'p_feed': feed,
+    'p_renew': renew,
+    'p_owned_until': ownedUntil.toUtc().toIso8601String()
+  });
   return result is String ? DateTime.tryParse(result) : null;
 }
 
 Future<void> showSocialFarm(BuildContext context, SupabaseClient client,
-        {required bool hasGuardDog}) =>
+        {required DateTime? guardOwnedUntil}) =>
     showDialog<void>(
       context: context,
       builder: (context) => StreamBuilder<AuthState>(
@@ -46,17 +51,17 @@ Future<void> showSocialFarm(BuildContext context, SupabaseClient client,
             client.auth.currentUser?.lastSignInAt,
           )),
           client: client,
-          hasGuardDog: hasGuardDog,
+          guardOwnedUntil: guardOwnedUntil,
         ),
       ),
     );
 
 class _SocialFarmDialog extends StatefulWidget {
   const _SocialFarmDialog(
-      {required this.client, required this.hasGuardDog, super.key});
+      {required this.client, required this.guardOwnedUntil, super.key});
 
   final SupabaseClient client;
-  final bool hasGuardDog;
+  final DateTime? guardOwnedUntil;
 
   @override
   State<_SocialFarmDialog> createState() => _SocialFarmDialogState();
@@ -168,9 +173,12 @@ class _SocialFarmDialogState extends State<_SocialFarmDialog> {
       'farm_social_profile',
       params: {if (name != null) 'p_name': name},
     ) as Map<String, dynamic>?;
-    if (profile != null && widget.hasGuardDog && !_guardSynced) {
+    if (profile != null &&
+        widget.guardOwnedUntil?.isAfter(DateTime.now()) == true &&
+        !_guardSynced) {
       try {
-        await updateSocialGuard(_client, feed: false, renew: false);
+        await updateSocialGuard(_client,
+            feed: false, renew: false, ownedUntil: widget.guardOwnedUntil!);
         _guardSynced = true;
       } on PostgrestException catch (error) {
         if (error.code != 'PGRST202') rethrow;

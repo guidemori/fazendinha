@@ -494,6 +494,8 @@ void main() {
 
   testWidgets('compra a vaca, coleta leite no pasto e vende no armazém',
       (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 850));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
     final player = Player.initial()
       ..coins = Player.cowCost + Player.cowFeedCost * 2;
     await tester.pumpWidget(MediaQuery(
@@ -513,6 +515,7 @@ void main() {
     await tester.tap(find.text('Comprar · 2.000 moedas'));
     await tester.pumpAndSettle();
     expect(player.hasCow, isTrue);
+    expect(find.text('Comprada'), findsOneWidget);
     expect(player.coins, Player.cowFeedCost * 2);
     await tester.ensureVisible(find.text('Comprar ração · 30 moedas'));
     await tester.tap(find.text('Comprar ração · 30 moedas'));
@@ -521,7 +524,6 @@ void main() {
     await tester.pumpAndSettle();
     expect(player.cowFeed, 2);
     expect(player.coins, 0);
-    expect(find.text('Comprada'), findsOneWidget);
     player.coins = Player.cowCost;
     expect(player.buyCow(DateTime.now()), isFalse);
     expect(player.coins, Player.cowCost);
@@ -590,9 +592,32 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  test('cada cachorro custa mil moedas e expira 30 dias após a compra', () {
+    final now = DateTime.utc(2026, 11, 28);
+    final player = Player.initial()..coins = 999;
+    expect(player.buyGuardDog(now), isFalse);
+    expect(player.hasGuardDogHouse, isFalse);
+    player.coins = 2000;
+    expect(player.buyGuardDog(now), isTrue);
+    expect(player.coins, 1000);
+    expect(player.buyGuardDog(now), isFalse);
+
+    final restored = Player.fromMap(player.toMap());
+    final expiration = now.add(const Duration(days: 30));
+    expect(restored.guardDogOwnedUntil, expiration);
+    expect(restored.ownsGuardDog(expiration), isFalse);
+    expect(restored.hasGuardDogHouse, isTrue);
+    expect(restored.buyGuardDog(expiration), isTrue);
+    expect(restored.coins, 0);
+  });
+
   testWidgets('compra ração, acorda o cachorro e volta a dormir com fome',
       (tester) async {
-    final player = Player.initial()..adoptGuardDog();
+    await tester.binding.setSurfaceSize(const Size(1200, 850));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final player = Player.initial()
+      ..coins += Player.guardDogCost
+      ..buyGuardDog(DateTime.now());
     await tester.pumpWidget(FazendinhaApp(player: player));
     await tester.pumpAndSettle();
     final sleeping = find.byTooltip('Cachorro dormindo · toque para alimentar');
@@ -610,6 +635,7 @@ void main() {
           of: find.byType(CropSelectorSheet),
           matching: find.byType(Scrollable)),
     );
+    await tester.pumpAndSettle();
     await tester.tap(buy);
     await tester.pumpAndSettle();
     expect(player.guardDogFood, 1);
@@ -631,6 +657,11 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
     expect(sleeping, findsOneWidget);
     expect(patrolling, findsNothing);
+    player.guardDogOwnedUntil = DateTime.now();
+    await tester.pump(const Duration(seconds: 1));
+    expect(sleeping, findsNothing);
+    expect(find.byTooltip('Casinha do cachorro'), findsOneWidget);
+    expect(player.hasGuardDog, isFalse);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 

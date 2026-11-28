@@ -478,14 +478,20 @@ class Player {
   static const milkXpPerCycle = 48;
   static const cowFeedCost = 30;
   int cowFeed = 0;
-  bool hasGuardDog = false;
+  static const guardDogCost = 1000;
+  static const guardDogLifetime = Duration(days: 30);
+  DateTime? guardDogOwnedUntil;
+
+  bool get hasGuardDogHouse => guardDogOwnedUntil != null;
+  bool get hasGuardDog => ownsGuardDog(DateTime.now());
+  bool ownsGuardDog(DateTime now) => guardDogOwnedUntil?.isAfter(now) ?? false;
   static const guardDogFoodCost = 15;
   Duration guardDogMealTime = const Duration(hours: 12);
   int guardDogFood = 0;
   DateTime? guardDogFedUntil;
 
   bool isGuardDogFed(DateTime now) =>
-      hasGuardDog && (guardDogFedUntil?.isAfter(now) ?? false);
+      ownsGuardDog(now) && (guardDogFedUntil?.isAfter(now) ?? false);
 
   bool buyGuardDogFood() {
     if (coins < guardDogFoodCost) return false;
@@ -495,15 +501,18 @@ class Player {
   }
 
   bool feedGuardDog(DateTime now, {DateTime? serverDeadline}) {
-    if (!hasGuardDog || guardDogFood == 0 || isGuardDogFed(now)) return false;
+    if (!ownsGuardDog(now) || guardDogFood == 0 || isGuardDogFed(now))
+      return false;
     guardDogFood--;
     guardDogFedUntil = serverDeadline ?? now.add(guardDogMealTime);
     return true;
   }
 
-  bool adoptGuardDog() {
-    if (hasGuardDog) return false;
-    hasGuardDog = true;
+  bool buyGuardDog(DateTime now) {
+    if (ownsGuardDog(now) || coins < guardDogCost) return false;
+    coins -= guardDogCost;
+    guardDogOwnedUntil = now.add(guardDogLifetime);
+    guardDogFedUntil = null;
     return true;
   }
 
@@ -829,7 +838,7 @@ class Player {
         'cowFeedUntil': cowFeedUntil?.toIso8601String(),
         'milk': milk,
         'cowFeed': cowFeed,
-        'hasGuardDog': hasGuardDog,
+        'guardDogOwnedUntil': guardDogOwnedUntil?.toIso8601String(),
         'guardDogFood': guardDogFood,
         'guardDogFedUntil': guardDogFedUntil?.toIso8601String(),
         'basket': basket.map((type, amount) => MapEntry(type.name, amount)),
@@ -885,7 +894,10 @@ class Player {
         );
       }
     }
-    player.hasGuardDog = map['hasGuardDog'] == true;
+    player.guardDogOwnedUntil = readDate('guardDogOwnedUntil') ??
+        (map['hasGuardDog'] == true
+            ? DateTime.now().add(guardDogLifetime)
+            : null);
     final savedDogFood = map['guardDogFood'];
     if (savedDogFood is int && savedDogFood > 0)
       player.guardDogFood = savedDogFood;
@@ -1420,7 +1432,7 @@ class CropSelectorSheet extends StatefulWidget {
     required this.onBuyWeedControl,
     required this.onBuyCow,
     required this.onBuyCowFeed,
-    required this.onAdoptGuardDog,
+    required this.onBuyGuardDog,
     required this.onBuyGuardDogFood,
     this.startOnAnimals = false,
     required this.onOpenWarehouse,
@@ -1432,7 +1444,7 @@ class CropSelectorSheet extends StatefulWidget {
   final VoidCallback onBuyWeedControl;
   final VoidCallback onBuyCow;
   final VoidCallback onBuyCowFeed;
-  final VoidCallback onAdoptGuardDog;
+  final VoidCallback onBuyGuardDog;
   final VoidCallback onBuyGuardDogFood;
   final bool startOnAnimals;
   final Future<void> Function() onOpenWarehouse;
@@ -1593,11 +1605,18 @@ class _CropSelectorSheetState extends State<CropSelectorSheet> {
                       leading: Image.asset(_farmIcon('guard_dog'),
                           width: 44, height: 40, excludeFromSemantics: true),
                       title: const Text('Cachorro guarda'),
-                      subtitle: const Text('Patrulha os canteiros'),
+                      subtitle: const Text(
+                          'Patrulha os canteiros · Validade: 30 dias'),
                       trailing: FilledButton.tonal(
-                        onPressed:
-                            player.hasGuardDog ? null : widget.onAdoptGuardDog,
-                        child: Text(player.hasGuardDog ? 'Adotado' : 'Adotar'),
+                        onPressed: player.hasGuardDog
+                            ? null
+                            : player.coins >= Player.guardDogCost
+                                ? widget.onBuyGuardDog
+                                : () =>
+                                    _showInsufficientCoins(Player.guardDogCost),
+                        child: Text(player.hasGuardDog
+                            ? 'Comprado'
+                            : 'Comprar · 1.000 moedas'),
                       ),
                     ),
                   if (_showAnimals)
@@ -2477,8 +2496,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               update(() {});
             }
           },
-          onAdoptGuardDog: () {
-            if (widget.player.adoptGuardDog()) {
+          onBuyGuardDog: () {
+            if (widget.player.buyGuardDog(DateTime.now())) {
               _farmChanged();
               unawaited(_renewGuard());
               update(() {});
@@ -2552,7 +2571,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (!widget.player.hasGuardDog || client?.auth.currentSession == null)
       return;
     try {
-      await updateSocialGuard(client!, feed: false);
+      await updateSocialGuard(client!,
+          feed: false, ownedUntil: widget.player.guardDogOwnedUntil!);
     } catch (error) {
       debugPrint('Não foi possível renovar a guarda: ${error.runtimeType}');
     }
@@ -2571,7 +2591,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final client = widget.socialClient;
       final deadline = client?.auth.currentSession == null
           ? null
-          : await updateSocialGuard(client!, feed: true);
+          : await updateSocialGuard(client!,
+              feed: true, ownedUntil: player.guardDogOwnedUntil!);
       final fed = player.feedGuardDog(DateTime.now(), serverDeadline: deadline);
       if (fed && mounted) _farmChanged();
       return fed;
@@ -2586,7 +2607,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _guardHouseTapped() {
     final player = widget.player;
-    if (player.isGuardDogFed(DateTime.now())) {
+    if (!player.hasGuardDog) {
+      _openFarmShop(animals: true);
+    } else if (player.isGuardDogFed(DateTime.now())) {
       _showFarmMessage('O cachorro está alimentado.');
     } else if (player.guardDogFood == 0) {
       _openFarmShop(animals: true);
@@ -2823,7 +2846,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             'Visitar fazendas de amigos', () {
                           if (widget.socialClient case final client?) {
                             showSocialFarm(context, client,
-                                hasGuardDog: player.hasGuardDog);
+                                guardOwnedUntil: player.guardDogOwnedUntil);
                           } else {
                             _showFarmDialog(
                                 'Amigos',
@@ -3670,7 +3693,7 @@ class _FarmSceneState extends State<_FarmScene> {
                           onTap: scene.onBuyPlot,
                         ),
                       ),
-                    if (player.hasGuardDog)
+                    if (player.hasGuardDogHouse)
                       Positioned(
                         left: (w - farmWidth * .476 - tileW * .48)
                             .clamp(4.0, math.max(4.0, w - 110)),
@@ -3679,15 +3702,16 @@ class _FarmSceneState extends State<_FarmScene> {
                                 tileW * .48)
                             .clamp(4.0, math.max(4.0, h - 110)),
                         child: Tooltip(
-                          message: dogFed
+                          message: dogFed || !player.hasGuardDog
                               ? 'Casinha do cachorro'
                               : 'Cachorro dormindo · toque para alimentar',
                           child: GestureDetector(
                             behavior: HitTestBehavior.opaque,
                             onTap: scene.onGuardHouse,
                             child: Image.asset(
-                              _farmIcon(
-                                  dogFed ? 'doghouse' : 'doghouse_sleeping'),
+                              _farmIcon(player.hasGuardDog && !dogFed
+                                  ? 'doghouse_sleeping'
+                                  : 'doghouse'),
                               width: (tileW * .90).clamp(48.0, 108.0),
                               height: (tileW * .90).clamp(48.0, 108.0),
                               semanticLabel: 'Casinha do cachorro',
@@ -4339,10 +4363,15 @@ void main() async {
       ..milkProductionTime = const Duration(seconds: 40)
       ..waterRefillTime = const Duration(seconds: 20)
       ..feedRefillTime = const Duration(seconds: 60)
-      ..buyCow(DateTime.now())
-      ..hasGuardDog = const bool.fromEnvironment('GUARD_PREVIEW');
-    if (player.hasGuardDog)
+      ..buyCow(DateTime.now());
+    if (const bool.fromEnvironment('GUARD_PREVIEW')) {
       player.guardDogMealTime = const Duration(seconds: 45);
+      if (Uri.base.queryParameters['comprar-cachorro'] == '1') {
+        player.coins += Player.guardDogCost;
+      } else {
+        player.guardDogOwnedUntil = DateTime.now().add(Player.guardDogLifetime);
+      }
+    }
     runApp(FazendinhaApp(player: player));
     return;
   }

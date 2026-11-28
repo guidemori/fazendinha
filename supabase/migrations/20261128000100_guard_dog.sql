@@ -1,6 +1,7 @@
 begin;
 
 alter table little_farm_social.players
+    add column guard_owned_until timestamptz,
     add column guard_until timestamptz,
     add column guard_fed_until timestamptz,
     add column guard_defenses integer not null default 0 check (guard_defenses between 0 and 3);
@@ -14,7 +15,7 @@ create table little_farm_social.guard_blocks (
 
 create index farm_social_harvests_plot on little_farm_social.harvests (plot_id);
 
-create function public.farm_social_guard(p_feed boolean, p_renew boolean)
+create function public.farm_social_guard(p_feed boolean, p_renew boolean, p_owned_until timestamptz)
 returns timestamptz
 language plpgsql security definer set search_path = ''
 as $$
@@ -23,15 +24,30 @@ declare
     fed_until timestamptz;
 begin
     if me is null then raise exception 'authentication_required'; end if;
+    -- This pilot has a local wallet. Register the local purchase for its
+    -- remaining term, bounded to 30 days by the server clock.
+    update little_farm_social.players
+    set guard_owned_until = least(p_owned_until, pg_catalog.clock_timestamp() + interval '30 days'),
+        guard_until = null,
+        guard_fed_until = null,
+        guard_defenses = 0
+    where id = me and p_owned_until > pg_catalog.clock_timestamp()
+        and (guard_owned_until is null or guard_owned_until <= pg_catalog.clock_timestamp());
+    if found then
+        delete from little_farm_social.guard_blocks where owner_id = me;
+    end if;
+
     if p_feed then
         update little_farm_social.players
         set guard_fed_until = pg_catalog.clock_timestamp() + interval '12 hours'
-        where id = me returning guard_fed_until into fed_until;
+        where id = me and guard_owned_until > pg_catalog.clock_timestamp()
+        returning guard_fed_until into fed_until;
     else
         update little_farm_social.players
         set guard_until = pg_catalog.clock_timestamp() + interval '24 hours',
             guard_defenses = 3
-        where id = me and (p_renew or guard_until is null)
+        where id = me and guard_owned_until > pg_catalog.clock_timestamp()
+            and (p_renew or guard_until is null)
         returning guard_fed_until into fed_until;
         if found then
             delete from little_farm_social.guard_blocks where owner_id = me;
@@ -41,8 +57,8 @@ begin
 end;
 $$;
 
-revoke all on function public.farm_social_guard(boolean, boolean) from public, anon, authenticated;
-grant execute on function public.farm_social_guard(boolean, boolean) to authenticated;
+revoke all on function public.farm_social_guard(boolean, boolean, timestamptz) from public, anon, authenticated;
+grant execute on function public.farm_social_guard(boolean, boolean, timestamptz) to authenticated;
 
 drop function public.farm_social_visit(uuid);
 create function public.farm_social_visit(p_owner uuid)
@@ -63,7 +79,8 @@ begin
     from little_farm_social.plots p
     join little_farm_social.players owner on owner.id = p.owner_id
     cross join lateral (
-        select case when owner.guard_until > pg_catalog.now()
+        select case when owner.guard_owned_until > pg_catalog.now()
+            and owner.guard_until > pg_catalog.now()
             and owner.guard_fed_until > pg_catalog.now()
             and owner.guard_defenses > 0
             then least(p.remaining, (p.remaining + claimed.total + 1) / 2)
@@ -110,7 +127,8 @@ begin
     where id = plot.owner_id for update;
     checked_at := pg_catalog.clock_timestamp();
 
-    if owner.guard_until > checked_at and owner.guard_fed_until > checked_at then
+    if owner.guard_owned_until > checked_at and owner.guard_until > checked_at
+        and owner.guard_fed_until > checked_at then
         if exists (select 1 from little_farm_social.guard_blocks blocked
             where blocked.owner_id = owner.id and blocked.plot_id = p_plot
                 and blocked.visitor_id = me) then
